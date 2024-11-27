@@ -1,0 +1,76 @@
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: pastebin_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - hash-generator
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: pastebin_api
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/pastebin
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+
+  hash-generator:
+    build:
+      context: ./hash-generator
+      dockerfile: Dockerfile
+    container_name: pastebin_hash_generator
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: pastebin_redis
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:16-alpine
+    container_name: pastebin_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: pastebin
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: pastebin_prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: pastebin_grafana
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  pg_data:
