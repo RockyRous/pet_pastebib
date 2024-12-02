@@ -32,7 +32,7 @@
 
 ### Предварительные требования
 
-- Python 3.9+
+- Python 3.12
 - Redis
 - PostgreSQL
 - Google Cloud Storage (учётная запись и bucket)
@@ -46,81 +46,18 @@
    cd pastebin-clone
    ```
 
-2. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Настройте переменные окружения:
+2. Настройте переменные окружения:
    Создайте файл `.env` и заполните его следующими параметрами:
    ```
-   DATABASE_URL=postgresql://user:password@localhost:5432/pastebin
-   REDIS_URL=redis://localhost:6379/0
-   GOOGLE_CLOUD_BUCKET=my-bucket
-   GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+   DATABASE_URL=postgresql://user:password@db:5432/pastebin
+   REDIS_URL=redis://redis:6379/0
    ```
+   Или скопируйте `.env.example`
 
-4. Запустите PostgreSQL, Redis и другие необходимые сервисы.
-
-5. Инициализируйте базу данных:
-   ```bash
-   python scripts/init_db.py
-   ```
-
-6. Запустите проект:
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-
-7. Для фоновых задач запустите Celery:
-   ```bash
-   celery -A app.tasks worker --loglevel=info
-   ```
-
-8. (Опционально) Запустите мониторинг:
-   - Prometheus и Grafana можно поднять с помощью Docker:
-     ```bash
-     docker-compose up -d
-     ```
-
----
-
-## Использование
-
-### Эндпоинты API
-
-1. **Создание текста**
-   - `POST /create`
-   - Тело запроса:
-     ```json
-     {
-       "content": "Ваш текст",
-       "ttl": "1d"  // Время жизни текста (например, 1d, 2h)
-     }
-     ```
-   - Пример ответа:
-     ```json
-     {
-       "url": "https://example.com/<hash>"
-     }
-     ```
-
-2. **Получение текста**
-   - `GET /<hash>`
-   - Пример ответа:
-     ```json
-     {
-       "content": "Ваш текст"
-     }
-     ```
-
-3. **Ошибка истечения TTL**
-   - Пример ответа:
-     ```json
-     {
-       "error": "This text has expired."
-     }
-     ```
+4. Запустите сборку docker-compose: 
+```bash
+docker-compose up --build
+```
 
 ---
 
@@ -129,7 +66,7 @@
 - **Язык программирования:** Python
 - **API:** FastAPI
 - **База данных:** PostgreSQL
-- **Кэш:** Redis
+- **Кэш:** Redis, Redis Sentinel
 - **Хранилище данных:** Google Cloud Storage
 - **Фоновые задачи:** Celery
 - **Балансировка нагрузки:** NGINX
