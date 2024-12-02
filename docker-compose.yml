@@ -1,4 +1,5 @@
 services:
+  # Основной NGINX
   nginx:
     image: nginx:1.25-alpine
     container_name: pastebin_nginx
@@ -7,53 +8,182 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - api
-      - hash-generator
+      - api-1
+      - api-2
+      - hash-generator-1
+      - hash-generator-2
+    networks:
+      - main_network
 
-  api:
+  # NGINX для балансировки внутри DB/Redis
+  nginx-db:
+    image: nginx:1.25-alpine
+    container_name: pastebin_nginx_db
+    volumes:
+      - ./nginx/nginx-db.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - postgres-main
+      - postgres-replica1
+      - postgres-replica2
+      - redis-node1
+      - redis-node2
+      - redis-node3
+    networks:
+      - db_network
+
+  # API микросервисы
+  api-1:
     build:
       context: ./api
       dockerfile: Dockerfile
-    container_name: pastebin_api
+    container_name: pastebin_api_1
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/pastebin
+      - DATABASE_URL=postgresql://user:password@postgres-main:5432/pastebin
       - REDIS_URL=redis://redis:6379/0
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
-      - redis
+    networks:
+      - main_network
+      - db_network
 
-  hash-generator:
+  api-2:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: pastebin_api_2
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres-main:5432/pastebin
+      - REDIS_URL=redis://redis:6379/0
+    networks:
+      - main_network
+      - db_network
+
+  # Hash генераторы
+  hash-generator-1:
     build:
       context: ./hash-generator
       dockerfile: Dockerfile
-    container_name: pastebin_hash_generator
+    container_name: pastebin_hash_gen_1
     environment:
       - REDIS_URL=redis://redis:6379/0
-    ports:
-      - "8001:8001"
-    depends_on:
-      - redis
+    networks:
+      - main_network
+      - db_network
 
-  redis:
+  hash-generator-2:
+    build:
+      context: ./hash-generator
+      dockerfile: Dockerfile
+    container_name: pastebin_hash_gen_2
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    networks:
+      - main_network
+      - db_network
+
+  # Redis - Master и слейвы
+  redis-node1:
     image: redis:7.2-alpine
-    container_name: pastebin_redis
-    ports:
-      - "6379:6379"
+    container_name: redis-node1
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis/redis-node1.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - db_network
 
-  db:
+  redis-node2:
+    image: redis:7.2-alpine
+    container_name: redis-node2
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis/redis-node2.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - db_network
+
+  redis-node3:
+    image: redis:7.2-alpine
+    container_name: redis-node3
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis/redis-node3.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - db_network
+
+  # Redis Sentinel
+  sentinel-node1:
+    image: redis:7.2-alpine
+    container_name: sentinel-node1
+    command: ["redis-sentinel", "/usr/local/etc/redis/sentinel.conf"]
+    volumes:
+      - ./redis/sentinel-node1.conf:/usr/local/etc/redis/sentinel.conf
+    networks:
+      - db_network
+    depends_on:
+      - redis-node1
+
+  sentinel-node2:
+    image: redis:7.2-alpine
+    container_name: sentinel-node2
+    command: ["redis-sentinel", "/usr/local/etc/redis/sentinel.conf"]
+    volumes:
+      - ./redis/sentinel-node2.conf:/usr/local/etc/redis/sentinel.conf
+    networks:
+      - db_network
+    depends_on:
+      - redis-node1
+
+  sentinel-node3:
+    image: redis:7.2-alpine
+    container_name: sentinel-node3
+    command: ["redis-sentinel", "/usr/local/etc/redis/sentinel.conf"]
+    volumes:
+      - ./redis/sentinel-node3.conf:/usr/local/etc/redis/sentinel.conf
+    networks:
+      - db_network
+    depends_on:
+      - redis-node1
+
+  # Для мониторинга
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis_exporter
+    environment:
+      REDIS_ADDR: redis-node1:6379
+    ports:
+      - "9121:9121"
+    networks:
+      - db_network
+
+  # PostgreSQL - основной и реплики
+  postgres-main:
     image: postgres:16-alpine
-    container_name: pastebin_db
+    container_name: postgres_main
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin
-    ports:
-      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    networks:
+      - db_network
 
+  postgres-replica1:
+    image: postgres:16-alpine
+    container_name: postgres_replica1
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    networks:
+      - db_network
+
+  postgres-replica2:
+    image: postgres:16-alpine
+    container_name: postgres_replica2
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    networks:
+      - db_network
+
+  # Prometheus
   prometheus:
     image: prom/prometheus:v2.47.0
     container_name: pastebin_prometheus
@@ -61,7 +191,10 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
+    networks:
+      - metrics_network
 
+  # Grafana
   grafana:
     image: grafana/grafana:10.1.0
     container_name: pastebin_grafana
@@ -71,6 +204,16 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+    networks:
+      - metrics_network
 
 volumes:
   pg_data:
+
+networks:
+  main_network:
+    driver: bridge
+  db_network:
+    driver: bridge
+  metrics_network:
+    driver: bridge
