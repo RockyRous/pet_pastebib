@@ -68,65 +68,16 @@
 
 ### 3.1 Load Balancer (NGINX)
 - **Роль:** распределение запросов между экземплярами API-сервиса.
-- **Настройка:**
-  ```nginx
-  http {
-      upstream api_servers {
-          server api_server_1:8000;
-          server api_server_2:8000;
-      }
 
-      server {
-          listen 80;
-
-          location / {
-              proxy_pass http://api_servers;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          }
-      }
-  }
-  ```
-- **Масштабирование:** добавление новых экземпляров API (например, `api_server_3`).
-
----
 
 ### 3.2 API-сервис (FastAPI)
 - **Функции:**
   - Создание текста.
   - Получение текста по ссылке.
   - Удаление текста (фоново через Celery).
-- **Конфигурация:**
-  ```python
-  from fastapi import FastAPI
-
-  app = FastAPI()
-
-  @app.post("/create")
-  def create_post(content: str, ttl: str):
-      # Генерация хэша, сохранение текста и метаданных
-      pass
-
-  @app.get("/{hash}")
-  def get_post(hash: str):
-      # Проверка кэша Redis и возврат текста
-      pass
-  ```
-
----
 
 ### 3.3 Хэш-генератор
 - Генерация уникального хэша (Base64):
-  ```python
-  import base64
-  import os
-
-  def generate_hash():
-      return base64.urlsafe_b64encode(os.urandom(6)).decode("utf-8").rstrip("=")
-  ```
-
----
 
 ### 3.4 Redis
 - **Кэш популярных постов:**
@@ -136,36 +87,11 @@
   - Ключ: `meta:<hash>`.
   - TTL: 1 час.
 
----
-
 ### 3.5 Celery
 - **Задачи:**
   1. Очистка истёкших данных:
-      ```python
-      @celery.task
-      def cleanup_expired_posts():
-          expired_posts = get_expired_posts()  # Запрос из PostgreSQL
-          for post in expired_posts:
-              delete_from_storage(post["content_path"])  # Удаление текста
-              delete_post(post["id"])  # Удаление из PostgreSQL
-              clear_cache(post["hash"])  # Удаление из Redis
-      ```
 
   2. Сбор статистики (популярные посты).
-
-- **Настройка периодических задач:**
-  ```python
-  from celery.schedules import crontab
-
-  celery.conf.beat_schedule = {
-      "cleanup-every-5-minutes": {
-          "task": "tasks.cleanup_expired_posts",
-          "schedule": crontab(minute="*/5"),
-      }
-  }
-  ```
-
----
 
 ### 3.6 Мониторинг (Prometheus + Grafana)
 - **Prometheus:** сбор метрик.
@@ -175,14 +101,7 @@
   - **Redis:** хиты кэша, использование памяти.
   - **PostgreSQL:** активные соединения, задержка запросов.
   - **Celery:** количество задач в очереди.
-- **Интеграция Prometheus с FastAPI:**
-  ```python
-  from prometheus_fastapi_instrumentator import Instrumentator
 
-  app = FastAPI()
-
-  Instrumentator().instrument(app).expose(app)
-  ```
 
 ---
 
