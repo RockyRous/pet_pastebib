@@ -40,6 +40,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:password@postgres-main:5432/pastebin
       - REDIS_URL=redis://redis:6379/0
+      - ROOT_PATH=/api
     networks:
       - main_network
       - db_network
@@ -52,6 +53,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:password@postgres-main:5432/pastebin
       - REDIS_URL=redis://redis:6379/0
+      - ROOT_PATH=/api
     networks:
       - main_network
       - db_network
