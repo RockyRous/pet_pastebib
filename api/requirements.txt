@@ -1,4 +1,8 @@
 fastapi
 uvicorn
 redis
-redis[sentinel]
+httpx
+sqlalchemy
+pydantic
+asyncio
+asyncpg
