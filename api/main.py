@@ -1,149 +1,165 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+import hashlib
+
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import Column, String, Integer, DateTime, select
-from sqlalchemy.ext.declarative import declarative_base
-import httpx
-import asyncio
 from datetime import datetime, timedelta
 import os
+import asyncpg
 
-# Настройки
-# Получение конфигурации из переменных окружения
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/pastebin_text")
-REDIS_URL_TEXT = os.getenv("REDIS_URL_TEXT", "redis://localhost:6379/0")
-HASH_SERVICE_URL = os.getenv("HASH_SERVICE_URL", "http://localhost:8000") + '/generate_hash'
+
+### Настройки
+
 # Инициализация Redis
+REDIS_URL_TEXT = "redis://localhost:6379/0"
 redis = Redis.from_url(REDIS_URL_TEXT, decode_responses=True)
+
 # Инициализация FastAPI
-app = FastAPI(root_path=os.getenv("ROOT_PATH", ""))
-# Инициализация подключения к базе данных
-engine = create_async_engine(DATABASE_URL, echo=True)
-async_session = async_sessionmaker(engine, expire_on_commit=False)
+app = FastAPI()
 
-async def get_db() -> AsyncSession:
-    async with async_session() as session:
-        yield session
+# Инициализация BD
+DATABASE_URL_TEXT = os.getenv(
+    "DATABASE_URL",  # Имя переменной окружения
+    "postgres://user:password@localhost:5432/pastebin_text"  # Значение по умолчанию
+)
 
-
-Base = declarative_base()
-
-class Post(Base):
-    __tablename__ = "posts"
-    hash = Column(String, primary_key=True)
-    text = Column(String, nullable=False)
-    ttl = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-# Pydantic Models
+######################################## Pydantic Models
 class CreatePostRequest(BaseModel):
     text: str = Field(..., max_length=500)
     ttl: int = Field(..., gt=0)
 
-
 class CreatePostResponse(BaseModel):
     short_url: str
 
+class GenerateHashRequest(BaseModel):
+    text: str
+    ttl: int
+
+class GenerateHashResponse(BaseModel):
+    short_hash: str
+
+
+######################################## FAST API
+async def get_db():
+    """ Функция для получения подключения к базе данных """
+    conn = await asyncpg.connect(DATABASE_URL_TEXT)
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+async def create_database():
+    try:
+        # Подключаемся к PostgreSQL, чтобы проверить наличие базы данных
+        conn = await asyncpg.connect(
+            user="user",
+            password="password",
+            database="postgres",  # Подключаемся к базе данных по умолчанию
+            host="localhost",
+            port=5432
+        )
+        # Создаем базу данных, если она не существует
+        result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_text'")
+        if not result:
+            await conn.execute('CREATE DATABASE pastebin_text')
+            print("Database 'pastebin_text' created.")
+        await conn.close()
+    except Exception as e:
+        print(f"Error creating database: {e}")
 
 async def create_tables():
-    """ Асинхронная функция для создания таблиц """
-    # Пытаемся создать таблицы в базе данных
-    async with engine.begin() as conn:
-        # Создаем все таблицы, если они не существуют
-        await conn.run_sync(Base.metadata.create_all)
+    """ Функция для создания базы данных и таблиц """
+    conn = await asyncpg.connect(DATABASE_URL_TEXT)
 
+    # Создание таблицы posts
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS posts (
+            hash TEXT PRIMARY KEY,
+            text TEXT NOT NULL,
+            ttl INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Создание таблицы hashes с уникальным индексом
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS hashes (
+            short_hash TEXT PRIMARY KEY,
+            ttl INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_short_hash UNIQUE (short_hash)
+        )
+    """)
+
+    print("Таблица успешно создана или уже существует.")
+    await conn.close()
 
 @app.on_event("startup")
 async def on_startup():
     """ Вызов функции для создания таблиц при старте приложения """
-    await create_tables()
+    try:
+        await create_database()
+        await create_tables()
+    except Exception as e:
+        print(f"Ошибка при подключении или создании таблиц: {e}")
+
+def generate_unique_hash(text: str) -> str:
+    """ Функция для генерации уникального хеша """
+    hash_object = hashlib.md5(text.encode())
+    return hash_object.hexdigest()[:8]
+
+
+# Генерация хэша и проверка уникальности
+async def generate_hash(request: dict, db) -> dict:
+    attempt = 0
+    while attempt < 5:  # Ограничиваем количество попыток
+        # Генерация уникального хэша с солью (например, текущей датой)
+        short_hash = generate_unique_hash(request['text'] + str(datetime.utcnow()) + str(attempt))
+
+        # Проверка наличия хэша в БД
+        query = "SELECT 1 FROM hashes WHERE short_hash = $1"
+        existing_hash = await db.fetchrow(query, short_hash)
+
+        if not existing_hash:
+            # Если хэш уникален, сохраняем его
+            query = """
+                INSERT INTO hashes (short_hash, ttl, created_at)
+                VALUES ($1, $2, $3)
+            """
+            await db.execute(query, short_hash, request['ttl'], datetime.utcnow())
+            return {"short_hash": short_hash}
+
+        attempt += 1
+
+    raise HTTPException(status_code=500, detail="Unable to generate unique hash after multiple attempts")
 
 
 @app.post("/create_post", response_model=CreatePostResponse)
-async def create_post(request: CreatePostRequest, background_tasks: BackgroundTasks,
-                      db: AsyncSession = Depends(get_db)):
-    async with httpx.AsyncClient() as client:
-        # try:
-        # Отправляем текст и TTL в hash_service
-        response = await client.post(HASH_SERVICE_URL, json={"text": request.text, "ttl": request.ttl})
-        response.raise_for_status()
-        short_hash = response.json().get("short_hash")
-        # except httpx.HTTPError as e:
-        #     raise HTTPException(status_code=500, detail="Hash service error: " + str(e))
+async def create_post(request: CreatePostRequest, db=Depends(get_db)):
+    response = await generate_hash({"text": request.text, "ttl": request.ttl}, db=db)
+    short_hash = response.get("short_hash")
 
     # Создаем короткий URL
     short_url = f"http://localhost:8000/{short_hash}"
 
-    # Добавляем фоновую задачу для записи в БД
-    background_tasks.add_task(save_post_to_db, db, short_hash, request.text, request.ttl)
+    # Запись в таблицу posts
+    query = """
+        INSERT INTO posts (hash, text, ttl, created_at)
+        VALUES ($1, $2, $3, $4)
+    """
+    await db.execute(query, short_hash, request.text, request.ttl, datetime.utcnow())
 
     return {"short_url": short_url}
 
 
 @app.get("/{short_hash}")
-async def get_post(short_hash: str, db: AsyncSession = Depends(get_db)):
-    # Проверяем Redis
-    text = await redis.get(short_hash)
-    if text:
-        return {"text": text}
+async def get_post(short_hash: str, db=Depends(get_db)):
+    # Проверяем, есть ли текст в базе данных
+    query = "SELECT text, ttl FROM posts WHERE hash = $1"
+    post = await db.fetchrow(query, short_hash)
 
-    # Если в Redis нет, ищем в PostgreSQL
-    query = select(Post).where(Post.hash == short_hash)
-    result = await db.execute(query)
-    post = result.scalar_one_or_none()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    # Кэшируем в Redis с TTL/2
-    await redis.set(short_hash, post.text, ex=post.ttl // 2)
-    return {"text": post.text}
-
-
-# Фоновые задачи
-async def save_post_to_db(db: AsyncSession, short_hash: str, text: str, ttl: int):
-    new_post = Post(hash=short_hash, text=text, ttl=ttl)
-    db.add(new_post)
-    await db.commit()
-
-
-###################################################
-
-# @app.get("/line_redis")
-# def line_redis():
-#     """ Подключение к Redis напрямую """
-#     # Подключение к Redis (замените 'redis-node1' на имя или IP Master узла)
-#     redis_client = redis.Redis(host='redis-node1', port=6379, db=0)
-#
-#     # Установка и получение значения
-#     redis_client.set('my_key', 'my_value')
-#     value = redis_client.get('my_key')
-#     return value.decode('utf-8')  # my_value
-#
-#
-# @app.get("/cache_redis")
-# def cache_redis():
-#     """ Кеширование запросов """
-#     redis_client = redis.Redis(host='redis-node1', port=6379, db=0)
-#
-#     def get_data_with_cache(key):
-#         # Попробовать получить данные из кеша
-#         cached_data = redis_client.get(key)
-#         if cached_data:
-#             print("Из кеша")
-#             return cached_data.decode('utf-8')
-#
-#         # Если данных нет, получить их, например, из базы данных
-#         print("Получение из источника")
-#         data = f"Data for {key}"  # Замените на реальный запрос
-#         time.sleep(2)  # Симуляция задержки
-#
-#         # Сохранить данные в кеш с TTL = 60 секунд
-#         redis_client.setex(key, 60, data)
-#         return data
-#
-#     # Пример использования
-#     return get_data_with_cache('test_key')
-
-
+    # Возвращаем текст поста
+    return {"text": post['text']}

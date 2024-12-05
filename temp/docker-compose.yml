@@ -1,0 +1,153 @@
+services:
+#  # Основной NGINX
+#  nginx:
+#    image: nginx:1.25-alpine
+#    container_name: nginx
+#    volumes:
+#      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+#    ports:
+#      - "80:80"
+#    depends_on:
+#      - api-service
+#      - hash-service
+#    networks:
+#      - main_network
+#
+#  # NGINX для балансировки внутри DB/Redis
+#  nginx-db:
+#    image: nginx:1.25-alpine
+#    container_name: nginx_db
+#    volumes:
+#      - ./nginx/nginx-db.conf:/etc/nginx/nginx.conf:ro
+#    depends_on:
+#      - postgres-hash
+#      - redis-hash
+#      # Добавить новое
+#    networks:
+#      - db_network
+
+  # API микросервисы
+  api-service:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: api_service
+    ports:  # todo: Удалить при использование NGINX
+      - "8001:8001"
+    environment:
+      - HASH_SERVICE_URL=http://hash_service:8002
+      - DATABASE_URL=postgresql+asyncpg://user:password@postgres-text:5432/pastebin_text
+      - REDIS_URL_TEXT=redis://redis-text:6379/0
+      - ROOT_PATH=/api
+    depends_on:
+      - hash-service
+    networks:
+      - main_network
+      - db_network
+
+  hash-service:
+    build:
+      context: ./hash-generator
+      dockerfile: Dockerfile
+    container_name: hash_service
+    ports:  # todo: Удалить при использование NGINX
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://user:password@postgres-hash:5432/pastebin_hash
+#      - REDIS_URL_HASH=redis://redis-hash:6379/0
+      - ROOT_PATH=/hash
+    networks:
+      - main_network
+      - db_network
+
+  # Redis
+#  redis-hash:
+#    image: redis:7.2-alpine
+#    container_name: redis_hash
+#    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+#    volumes:
+#      - ./redis/redis_hash.conf:/usr/local/etc/redis/redis.conf
+#    networks:
+#      - db_network
+
+  redis-text:
+    image: redis:7.2-alpine
+    container_name: redis_text
+    command: [ "redis-server", "/usr/local/etc/redis/redis.conf" ]
+    volumes:
+      - ./redis/redis_text.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - db_network
+
+#  # Для мониторинга
+#  redis-exporter:
+#    image: oliver006/redis_exporter:latest
+#    container_name: redis_exporter
+#    environment:
+#      REDIS_ADDR: redis-node1:6379
+#    ports:
+#      - "9121:9121"
+#    networks:
+#      - db_network
+
+  # PostgreSQL
+  postgres-hash:
+    image: postgres:16-alpine
+    container_name: postgres_hash
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: pastebin_hash
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - db_network
+
+  postgres-text:
+    image: postgres:16-alpine
+    container_name: postgres_text
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: pastebin_text
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - db_network
+
+#  # Prometheus
+#  prometheus:
+#    image: prom/prometheus:v2.47.0
+#    container_name: prometheus
+#    volumes:
+#      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+#    ports:
+#      - "9090:9090"
+#    networks:
+#      - metrics_network
+#
+#  # Grafana
+#  grafana:
+#    image: grafana/grafana:10.1.0
+#    container_name: grafana
+#    volumes:
+#      - ./grafana/provisioning:/etc/grafana/provisioning
+#    ports:
+#      - "3000:3000"
+#    depends_on:
+#      - prometheus
+#    networks:
+#      - metrics_network
+
+volumes:
+  pg_data:
+    driver: local
+
+networks:
+  main_network:
+    driver: bridge
+  db_network:
+    driver: bridge
+#  metrics_network:
+#    driver: bridge
+
