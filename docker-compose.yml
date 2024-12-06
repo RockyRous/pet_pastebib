@@ -6,8 +6,10 @@ services:
     container_name: api_service
     environment:
       DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
+      REDIS_URL: redis://redis-text:6379/0
     depends_on:
       - postgres_text
+      - redis-text
     ports:
       - "8001:8001"
     networks:
@@ -16,11 +18,9 @@ services:
   redis-text:
     image: redis:7.2-alpine
     container_name: redis_text
-    command: [ "redis-server", "/usr/local/etc/redis/redis.conf" ]
+    restart: always
     ports:
       - "6379:6379"
-    volumes:
-      - ./redis/redis_text.conf:/usr/local/etc/redis/redis.conf
     networks:
       - main_network
 
