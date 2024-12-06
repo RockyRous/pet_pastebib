@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 redis
-aiohttp
+httpx
 sqlalchemy
 pydantic
 asyncio
