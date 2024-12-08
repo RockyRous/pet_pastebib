@@ -4,14 +4,15 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
+from os import getenv
 
 from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready
 
 ### Настройки
 
 # Инициализация Redis
-REDIS_URL_TEXT = "redis://redis_text:6379/0"
-REDIS_URL_HASH = "redis://redis_hash:6380/0"
+REDIS_URL_TEXT = getenv('REDIS_URL_TEXT', default="redis://172.18.0.3/0")
+REDIS_URL_HASH = getenv('REDIS_URL_HASH', default="redis://172.18.0.2/0")
 
 redis_text = Redis.from_url(REDIS_URL_TEXT, decode_responses=True)
 redis_hash = Redis.from_url(REDIS_URL_HASH, decode_responses=True)
@@ -147,3 +148,5 @@ async def get_post(short_hash: str, db=Depends(get_db)):
     except Exception as e:
         print(f"Ошибка в get_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
