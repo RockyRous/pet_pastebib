@@ -1,12 +1,10 @@
 import asyncio
 import base64
 import os
-
-from fastapi import FastAPI
-from asyncpg import create_pool
-from redis.asyncio import Redis
-
 import time
+import asyncpg
+from fastapi import FastAPI
+from redis.asyncio import Redis
 
 app = FastAPI()
 
@@ -25,7 +23,6 @@ LOCK_TIMEOUT = 10000  # 10 секунд в миллисекундах
 MAX_RETRIES = 5  # Максимальное количество попыток
 SEQUENCE_NAME = "my_sequence"
 
-db_pool = create_pool(dsn=DB_DSN)
 redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 
 
@@ -49,23 +46,34 @@ async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
 
 async def fetch_batch_sequences(batch_size: int) -> list[int]:
     """ Получение партии сиквенсов из PostgreSQL """
-    async with db_pool.acquire() as conn:
+    try:
+        conn = await asyncpg.connect(DB_DSN)
         query = f"SELECT nextval($1) FROM generate_series(1, {batch_size})"
         result = await conn.fetch(query, SEQUENCE_NAME)
         return [row["nextval"] for row in result]
+    finally:
+        await conn.close()
 
 
 async def acquire_lock(redis_client, lock_key, lock_timeout):
     """ блокировки Redis """
     lock_value = str(time.time())  # Уникальное значение для блокировки
-    is_set = await redis_client.set(lock_key, lock_value, nx=True, px=lock_timeout)
-    return is_set, lock_value
+    try:
+        is_set = await redis_client.set(lock_key, lock_value, nx=True, px=lock_timeout)
+        return is_set, lock_value
+    except Exception as e:
+        print(f"Error acquiring Redis lock: {e}")
+        return False, None
 
 
 async def release_lock(redis_client, lock_key, lock_value):
-    current_value = await redis_client.get(lock_key)
-    if current_value == lock_value:
-        await redis_client.delete(lock_key)  # Удаляем блокировку
+    """ Освобождение блокировки Redis """
+    try:
+        current_value = await redis_client.get(lock_key)
+        if current_value == lock_value:
+            await redis_client.delete(lock_key)  # Удаляем блокировку
+    except Exception as e:
+        print(f"Error releasing Redis lock: {e}")
 
 
 async def populate_redis_cache():
@@ -101,11 +109,14 @@ async def ensure_redis_cache():
 
 
 async def ensure_redis_cache_periodically():
-    """ Фоновая задача для проверки кеша """
-    while True:
+    """ Фоновая задача для проверки кеша с ограничением времени ожидания """
+    # while True:  # Разобраться как делать
+    if True:
         try:
-            await ensure_redis_cache()
+            await asyncio.wait_for(ensure_redis_cache(), timeout=10)  # Тайм-аут 10 секунд
             await asyncio.sleep(1)
+        except asyncio.TimeoutError:
+            print("Timeout error occurred while ensuring Redis cache.")
         except Exception as e:
             print(f"Background cache task failed: {e}")
 
@@ -132,9 +143,10 @@ async def get_hash():
 
 # Проверка существования последовательности и её создание, если необходимо
 async def check_and_create_sequence():
-    async with db_pool.acquire() as conn:
+    try:
+        conn = await asyncpg.connect(DB_DSN)
         # Проверка, существует ли последовательность
-        result = await conn.fetch("""
+        result = await conn.fetch(""" 
             SELECT EXISTS (
                 SELECT 1 
                 FROM pg_class 
@@ -157,16 +169,16 @@ async def check_and_create_sequence():
             print(f"Sequence '{SEQUENCE_NAME}' created successfully.")
         else:
             print(f"Sequence '{SEQUENCE_NAME}' already exists.")
+    except Exception as e:
+        print(f"Error checking or creating sequence: {e}")
+    finally:
+        await conn.close()
 
 
 @app.on_event("startup")
 async def startup():
     """ Инициализация приложения """
-    global db_pool
     try:
-        print("Starting database pool...")
-        db_pool = await create_pool(dsn=DB_DSN)
-        print("Database pool created.")
         await check_and_create_sequence()
         print("Checked and created sequence.")
 
@@ -176,11 +188,10 @@ async def startup():
     except Exception as e:
         print(f"Failed to start application: {e}")
 
+
 @app.on_event("shutdown")
 async def shutdown():
     try:
-        if db_pool:
-            await db_pool.close()
         if redis_client:
             await redis_client.close()
         print("Application shut down cleanly.")
