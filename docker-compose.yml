@@ -17,6 +17,22 @@ services:
     networks:
       - main_network
 
+  hash-service:
+    build:
+      context: ./hash_service
+      dockerfile: Dockerfile
+    container_name: hash_service
+    environment:
+      DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
+      REDIS_URL_HASH: redis://redis_hash/0
+    depends_on:
+      - postgres_text
+      - redis_hash
+    ports:
+      - "8002:8002"
+    networks:
+      - main_network
+
   redis_text:
     image: redis:7.2-alpine
     container_name: redis_text
