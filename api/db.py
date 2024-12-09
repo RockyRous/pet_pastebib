@@ -40,20 +40,18 @@ async def create_database():
         print(f"Error creating database: {e}")
 
 
-async def ensure_redis_ready(retries=5, delay=2):
+async def ensure_redis_ready(redis_url, retries=5, delay=2):
     for attempt in range(retries):
         try:
-            # Подключение с использованием redis.asyncio
-            redis_client = redis.from_url("redis://redis_text:6379")
-            await redis_client.ping()  # Проверка подключения
-            print("Redis доступен.")
+            redis_client = redis.from_url(redis_url, decode_responses=True)
+            await redis_client.ping()
+            print(f"Redis доступен: {redis_url}")
             return redis_client
         except Exception as e:
-            print(f"Попытка {attempt + 1}/{retries} подключения к Redis не удалась: {e}")
+            print(f"Попытка {attempt + 1}/{retries} подключения к {redis_url} не удалась: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
-    raise Exception("Не удалось подключиться к Redis.")
-
+    raise Exception(f"Не удалось подключиться к Redis: {redis_url}")
 
 async def ensure_db_ready(retries=5, delay=2):
     """Проверка доступности базы данных с ретри-механизмом."""

@@ -6,21 +6,28 @@ services:
     container_name: api_service
     environment:
       DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
-      REDIS_URL: redis://redis-text:6379/0
+      REDIS_URL_TEXT: redis://redis_text/0
+      REDIS_URL_HASH: redis://redis_hash/0
     depends_on:
       - postgres_text
-      - redis-text
+      - redis_text
+      - redis_hash
     ports:
       - "8001:8001"
     networks:
       - main_network
 
-  redis-text:
+  redis_text:
     image: redis:7.2-alpine
     container_name: redis_text
     restart: always
-    ports:
-      - "6379:6379"
+    networks:
+      - main_network
+
+  redis_hash:
+    image: redis:7.2-alpine
+    container_name: redis_hash
+    restart: always
     networks:
       - main_network
 
