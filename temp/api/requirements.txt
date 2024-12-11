@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-redis
-httpx
-sqlalchemy
-pydantic
-asyncio
-asyncpg

@@ -1,29 +1,24 @@
-import hashlib
 from datetime import datetime, timedelta
+from os import getenv
 
+import aiohttp
+import asyncpg
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from os import getenv
 
-from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready
+from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready, DATABASE_URL_TEXT
 
-### Настройки
+# Настройка
+app = FastAPI()
 
 # Инициализация Redis
 REDIS_URL_TEXT = getenv('REDIS_URL_TEXT', default="redis://172.18.0.3/0")
-REDIS_URL_HASH = getenv('REDIS_URL_HASH', default="redis://172.18.0.2/0")
+redis = Redis.from_url(REDIS_URL_TEXT, decode_responses=True)
 
-redis_text = Redis.from_url(REDIS_URL_TEXT, decode_responses=True)
-redis_hash = Redis.from_url(REDIS_URL_HASH, decode_responses=True)
-
-
-# Инициализация FastAPI
-app = FastAPI()
+HASH_SERVICE_URL = getenv('HASH_SERVICE_URL', default="http://hash-service:8002/generate-hash")
 
 ######################################## Pydantic Models
-
-
 class CreatePostRequest(BaseModel):
     text: str = Field(..., max_length=500)
     ttl: int = Field(..., gt=0)
@@ -31,15 +26,6 @@ class CreatePostRequest(BaseModel):
 
 class CreatePostResponse(BaseModel):
     short_url: str
-
-
-class GenerateHashRequest(BaseModel):
-    text: str
-    ttl: int
-
-
-class GenerateHashResponse(BaseModel):
-    short_hash: str
 
 
 ######################################## FAST API
@@ -53,68 +39,45 @@ async def on_startup():
         await create_tables()
 
         # Убедитесь, что Redis доступен
-        global redis_text, redis_hash
-        redis_text = await ensure_redis_ready(REDIS_URL_TEXT)
-        redis_hash = await ensure_redis_ready(REDIS_URL_HASH)
+        global redis
+        redis = await ensure_redis_ready(REDIS_URL_TEXT)
     except Exception as e:
         print(f"Ошибка при старте приложения: {e}")
 
 
-def generate_unique_hash(text: str, length=8) -> str:
-    unique_data = f"{text}{datetime.utcnow().timestamp()}"
-    return hashlib.sha256(unique_data.encode()).hexdigest()[:length]
-
-
-# Генерация хэша и проверка уникальности
-async def generate_hash(request: dict, db) -> dict:
-    attempt = 0
-    while attempt < 10:
-        # Генерация уникального хэша с солью (например, текущей датой)
-        short_hash = generate_unique_hash(request['text'] + str(datetime.utcnow()) + str(attempt))
-
-        # Проверка наличия хэша в БД
-        query = "SELECT 1 FROM hashes WHERE short_hash = $1"
-        existing_hash = await db.fetchrow(query, short_hash)
-
-        if not existing_hash:
-            # Если хэш уникален, сохраняем его
-            query = """
-                INSERT INTO hashes (short_hash, ttl, created_at)
-                VALUES ($1, $2, $3)
-            """
-            await db.execute(query, short_hash, request['ttl'], datetime.utcnow())
-            return {"short_hash": short_hash}
-
-        attempt += 1
-
-    raise HTTPException(status_code=500, detail="Unable to generate unique hash after multiple attempts")
-
-
-async def store_in_redis_or_db(short_hash: str, text: str, ttl: int, db):
+async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
     """Сохранение текста в Redis (если TTL короткий) или в БД."""
     if ttl <= 3600:  # Если TTL <= 1 час
         # Сохраняем текст в Redis (redis_text)
-        await redis_text.set(short_hash, text, ex=ttl)
+        await redis.set(short_hash, text, ex=ttl)
     else:
         # Сохраняем текст в БД
-        query = """
-            INSERT INTO posts (hash, text, ttl, created_at)
-            VALUES ($1, $2, $3, $4)
-        """
-        await db.execute(query, short_hash, text, ttl, datetime.utcnow())
-
-    # Сохраняем хэш в Redis (redis_hash)
-    await redis_hash.set(short_hash, ttl, ex=ttl)
+        db = await asyncpg.connect(DATABASE_URL_TEXT)
+        try:
+            query = """
+                INSERT INTO posts (hash, text, ttl, created_at)
+                VALUES ($1, $2, $3, $4)
+            """
+            await db.execute(query, short_hash, text, ttl, datetime.utcnow())
+        finally:
+            await db.close()
 
 
 @app.post("/create_post", response_model=CreatePostResponse)
-async def create_post(request: CreatePostRequest, db=Depends(get_db)):
+async def create_post(request: CreatePostRequest):
     try:
         # Генерация уникального хэша
-        short_hash = generate_unique_hash(request.text)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(HASH_SERVICE_URL) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=response.status,
+                                        detail=f"Error from hash service: {await response.text()}")
+                data = await response.json()
+                short_hash = data['hash']
 
         # Сохранение в Redis или БД
-        await store_in_redis_or_db(short_hash, request.text, request.ttl, db)
+        await store_in_redis_or_db(short_hash, request.text, request.ttl)
 
         # Генерация короткой ссылки
         short_url = f"http://localhost:8001/{short_hash}"
@@ -129,18 +92,18 @@ async def create_post(request: CreatePostRequest, db=Depends(get_db)):
 async def get_post(short_hash: str, db=Depends(get_db)):
     try:
         # Сначала пытаемся получить текст из Redis (redis_text)
-        text = await redis_text.get(short_hash)
+        text = await redis.get(short_hash)
 
         if not text:
             # Если текста нет в Redis, ищем его в БД
             query = "SELECT text FROM posts WHERE hash = $1"
             result = await db.fetchrow(query, short_hash)
 
-            if result:
+            if result:  # todo: Почему-то при переходе ссылкой на кеш, в логах дает 404. При юзе ендпоинта норм.
                 text = result["text"]
 
                 # Кэшируем текст в Redis (redis_text)
-                await redis_text.set(short_hash, text, ex=600)  # TTL = 600 секунд
+                await redis.set(short_hash, text, ex=600)  # TTL = 600 секунд
             else:
                 raise HTTPException(status_code=404, detail="Post not found")
 
@@ -148,5 +111,3 @@ async def get_post(short_hash: str, db=Depends(get_db)):
     except Exception as e:
         print(f"Ошибка в get_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-

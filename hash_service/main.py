@@ -9,10 +9,9 @@ from redis.asyncio import Redis
 app = FastAPI()
 
 # Настройка подключения к базе данных и Redis
-DB_DSN = os.getenv(
-    "DATABASE_URL",  # Имя переменной окружения
-    "postgres://user:password@localhost:5432/pastebin_text"  # Значение по умолчанию
-)
+# DB_DSN = os.getenv("DATABASE_URL", "postgres://user:password@localhost:5432/pastebin_hash")
+DB_DSN = os.getenv("DATABASE_URL", "postgres://user:password@localhost/pastebin_hash")
+
 REDIS_URL = os.getenv('REDIS_URL_HASH', default="redis://172.18.0.2/0")
 
 REDIS_HASH_KEY = "hash_cache"
@@ -26,6 +25,21 @@ SEQUENCE_NAME = "my_sequence"
 redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 
 
+async def create_database():
+    print(f'DB url: {DB_DSN}')
+    try:
+        # Подключаемся к PostgreSQL, чтобы проверить наличие базы данных
+        conn = await asyncpg.connect(DB_DSN.replace('pastebin_hash', 'postgres'))
+        # Создаем базу данных, если она не существует
+        result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_hash'")
+        if not result:
+            await conn.execute('CREATE DATABASE pastebin_hash')
+            print("Database 'pastebin_hash' created.")
+        await conn.close()
+    except Exception as e:
+        print(f"Error creating database: {e}")
+
+
 def generate_hash(seq: int) -> str:
     """ Генерация 8-значного хэша из числа """
     return base64.urlsafe_b64encode(seq.to_bytes(6, byteorder="big")).decode("utf-8")[:8]
@@ -33,6 +47,7 @@ def generate_hash(seq: int) -> str:
 
 async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
     """ Повторная попытка с задержкой """
+    print('Повторная попытка с задержкой')
     for attempt in range(retries):
         try:
             return await func()
@@ -46,6 +61,7 @@ async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
 
 async def fetch_batch_sequences(batch_size: int) -> list[int]:
     """ Получение партии сиквенсов из PostgreSQL """
+    print('Получение партии сиквенсов из PostgreSQL')
     try:
         conn = await asyncpg.connect(DB_DSN)
         query = f"SELECT nextval($1) FROM generate_series(1, {batch_size})"
@@ -53,10 +69,12 @@ async def fetch_batch_sequences(batch_size: int) -> list[int]:
         return [row["nextval"] for row in result]
     finally:
         await conn.close()
+        print('Получение партии сиквенсов из PostgreSQL - complete')
 
 
 async def acquire_lock(redis_client, lock_key, lock_timeout):
     """ блокировки Redis """
+    print('блокировки Redis')
     lock_value = str(time.time())  # Уникальное значение для блокировки
     try:
         is_set = await redis_client.set(lock_key, lock_value, nx=True, px=lock_timeout)
@@ -68,6 +86,7 @@ async def acquire_lock(redis_client, lock_key, lock_timeout):
 
 async def release_lock(redis_client, lock_key, lock_value):
     """ Освобождение блокировки Redis """
+    print('Освобождение блокировки Redis')
     try:
         current_value = await redis_client.get(lock_key)
         if current_value == lock_value:
@@ -78,6 +97,7 @@ async def release_lock(redis_client, lock_key, lock_value):
 
 async def populate_redis_cache():
     """ Наполнение кеша """
+    print('Наполнение кеша')
     lock_acquired, lock_value = await acquire_lock(redis_client, REDIS_LOCK_KEY, LOCK_TIMEOUT)
     if not lock_acquired:
         print("Failed to acquire lock for cache population.")
@@ -100,6 +120,7 @@ async def populate_redis_cache():
 
 async def ensure_redis_cache():
     """ Проверка кеша и автоматическое пополнение """
+    print('Проверка кеша и автоматическое пополнение')
     try:
         current_count = await redis_client.llen(REDIS_HASH_KEY)
         if current_count < CRITICAL_THRESHOLD:
@@ -110,7 +131,8 @@ async def ensure_redis_cache():
 
 async def ensure_redis_cache_periodically():
     """ Фоновая задача для проверки кеша с ограничением времени ожидания """
-    # while True:  # Разобраться как делать
+    print('Фоновая задача для проверки кеша с ограничением времени ожидания')
+    # while True:  # todo Разобраться как делать
     if True:
         try:
             await asyncio.wait_for(ensure_redis_cache(), timeout=10)  # Тайм-аут 10 секунд
@@ -123,6 +145,7 @@ async def ensure_redis_cache_periodically():
 
 @app.get("/generate-hash")
 async def get_hash():
+    print('get_hash start')
     try:
         # Проверяем и пополняем кеш при необходимости
         await ensure_redis_cache()
@@ -141,8 +164,9 @@ async def get_hash():
         return {"error": "Internal server error"}, 500
 
 
-# Проверка существования последовательности и её создание, если необходимо
 async def check_and_create_sequence():
+    """ Проверка существования последовательности и её создание, если необходимо """
+    print('Проверка существования последовательности и её создание, если необходимо')
     try:
         conn = await asyncpg.connect(DB_DSN)
         # Проверка, существует ли последовательность
@@ -178,7 +202,10 @@ async def check_and_create_sequence():
 @app.on_event("startup")
 async def startup():
     """ Инициализация приложения """
+    print('Инициализация приложения')
     try:
+        await create_database()\
+
         await check_and_create_sequence()
         print("Checked and created sequence.")
 
@@ -191,6 +218,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    print('shutdown')
     try:
         if redis_client:
             await redis_client.close()
