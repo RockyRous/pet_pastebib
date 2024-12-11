@@ -24,7 +24,7 @@
 - **Celery:** выполняет фоновые задачи, такие как очистка истёкших данных.
 - **Prometheus + Grafana:** система мониторинга и визуализации.
 
-Подробное описание архитектуры можно найти в документе [architecture_document.md](./architecture_document.md).
+Подробное описание архитектуры можно найти в документе [architecture_document.md](architecture_document.md).
 
 ---
 
@@ -76,14 +76,14 @@ docker-compose up --build
 
 ## Лицензия
 
-Этот проект распространяется под лицензией MIT. Полный текст лицензии можно найти в файле [LICENSE](./LICENSE).
+Этот проект распространяется под лицензией MIT. Полный текст лицензии можно найти в файле [LICENSE](LICENSE).
 
 ---
 
 ## Документация
 
-- **Архитектура:** [architecture_document.md](./architecture_document.md)
-- **Лицензия:** [LICENSE](./LICENSE)
+- **Архитектура:** [architecture_document.md](architecture_document.md)
+- **Лицензия:** [LICENSE](LICENSE)
 
 ---
 

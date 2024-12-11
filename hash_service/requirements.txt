@@ -2,7 +2,6 @@ fastapi
 uvicorn
 redis
 aiohttp
-sqlalchemy
 pydantic
 asyncio
 asyncpg

@@ -1,58 +1,65 @@
 services:
+  # Api
   api-service:
     build:
       context: ./api
       dockerfile: Dockerfile
-    container_name: api_service
+    container_name: api-service
     environment:
-      DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
+#      DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
+      DATABASE_URL: postgres://user:password@postgres_text/pastebin_text
       REDIS_URL_TEXT: redis://redis_text/0
-      REDIS_URL_HASH: redis://redis_hash/0
+      HASH_SERVICE_URL: http://hash-service:8002/generate-hash
     depends_on:
       - postgres_text
       - redis_text
-      - redis_hash
     ports:
       - "8001:8001"
     networks:
-      - main_network
+      - api_network
+      - hash_network
 
   hash-service:
     build:
       context: ./hash_service
       dockerfile: Dockerfile
-    container_name: hash_service
-    environment:
-      DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
-      REDIS_URL_HASH: redis://redis_hash/0
-    depends_on:
-      - postgres_text
-      - redis_hash
+    container_name: hash-service
     ports:
       - "8002:8002"
+    environment:
+#      DATABASE_URL: postgres://user:password@postgres_hash:5432/pastebin_hash
+      DATABASE_URL: postgres://user:password@postgres_hash/pastebin_hash
+      REDIS_URL_HASH: redis://redis_hash/0
+    depends_on:
+      - postgres_hash
+      - redis_hash
     networks:
-      - main_network
+      - hash_network
 
+
+  # Redis
   redis_text:
     image: redis:7.2-alpine
     container_name: redis_text
     restart: always
     networks:
-      - main_network
+      - api_network
 
   redis_hash:
     image: redis:7.2-alpine
     container_name: redis_hash
     restart: always
     networks:
-      - main_network
+      - hash_network
 
+
+  # postgres
   postgres_text:
     image: postgres:16-alpine
     container_name: postgres_text
     restart: always
-    ports:
-      - "5432:5432"
+#    ports:
+#      - "5432:5432"
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
@@ -60,12 +67,30 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     networks:
-      - main_network
+      - api_network
+
+  postgres_hash:
+    image: postgres:16-alpine
+    container_name: postgres_hash
+    restart: always
+#    ports:
+#      - "5433:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: pastebin_hash
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - hash_network
+
 
 volumes:
   pg_data:
     driver: local
 
 networks:
-  main_network:
+  api_network:
+    driver: bridge
+  hash_network:
     driver: bridge
