@@ -204,7 +204,7 @@ async def startup():
     """ Инициализация приложения """
     print('Инициализация приложения')
     try:
-        await create_database()\
+        await create_database()
 
         await check_and_create_sequence()
         print("Checked and created sequence.")

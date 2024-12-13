@@ -17,25 +17,19 @@ async def get_db():
         await conn.close()
 
 
-# async def create_database():
-#     try:
-#         # Подключаемся к PostgreSQL, чтобы проверить наличие базы данных
-#         conn = await asyncpg.connect(
-#
-#             user="user",
-#             password="password",
-#             database="postgres",  # Подключаемся к базе данных по умолчанию
-#             host="localhost",
-#             port=5432
-#         )
-#         # Создаем базу данных, если она не существует
-#         result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_text'")
-#         if not result:
-#             await conn.execute('CREATE DATABASE pastebin_text')
-#             print("Database 'pastebin_text' created.")
-#         await conn.close()
-#     except Exception as e:
-#         print(f"Error creating database: {e}")
+async def create_database():
+    print(f'DB url: {DATABASE_URL_TEXT}')
+    try:
+        # Подключаемся к PostgreSQL, чтобы проверить наличие базы данных
+        conn = await asyncpg.connect(DATABASE_URL_TEXT.replace('pastebin_text', 'postgres'))
+        # Создаем базу данных, если она не существует
+        result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_text'")
+        if not result:
+            await conn.execute('CREATE DATABASE pastebin_text')
+            print("Database 'pastebin_text' created.")
+        await conn.close()
+    except Exception as e:
+        print(f"Error creating database: {e}")
 
 
 async def ensure_redis_ready(redis_url, retries=5, delay=2):

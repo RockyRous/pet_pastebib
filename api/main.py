@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
-from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready, DATABASE_URL_TEXT
+from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready, DATABASE_URL_TEXT, create_database
 
 # Настройка
 app = FastAPI()
@@ -35,6 +35,7 @@ async def on_startup():
     """Инициализация при старте приложения."""
     try:
         # Убедитесь, что база данных доступна
+        await create_database()
         await ensure_db_ready()
         await create_tables()
 
