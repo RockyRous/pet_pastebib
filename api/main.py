@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from os import getenv
 
 import aiohttp
@@ -8,24 +8,20 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
-from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready, DATABASE_URL_TEXT, create_database
+from database import create_tables, ensure_db_ready, ensure_redis_ready, create_database, store_in_db, get_post_db
 from logging_config import log_request, logger
 
-# Настройка
+
+### SETTINGS
 app = FastAPI()
 
-# logger.info("Пример лога")
-# logger.debug("Пример лога")
-# logger.warning("Пример варнинга")
-# logger.error("Пример ошибки")
-
-# Инициализация Redis
 REDIS_URL_TEXT = getenv('REDIS_URL_TEXT', default="redis://172.18.0.3/0")
 redis = Redis.from_url(REDIS_URL_TEXT, decode_responses=True)
 
 HASH_SERVICE_URL = getenv('HASH_SERVICE_URL', default="http://hash-service:8002/generate-hash")
 
-######################################## Pydantic Models
+
+### Pydantic Models
 class CreatePostRequest(BaseModel):
     text: str = Field(..., max_length=500)
     ttl: int = Field(..., gt=0)
@@ -35,11 +31,21 @@ class CreatePostResponse(BaseModel):
     short_url: str
 
 
-######################################## FAST API
+### UTILS
+async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
+    """Сохранение текста в Redis (если TTL короткий) или в БД."""
+    if ttl <= 3600:  # Если TTL <= 1 час
+        # Сохраняем текст в Redis (redis_text)
+        await redis.set(short_hash, text, ex=ttl)
+    else:
+        # Сохраняем текст в БД
+        await store_in_db(short_hash, text, ttl)
 
+
+### ENDPOINTS
 @app.on_event("startup")
 async def on_startup():
-    """Инициализация при старте приложения."""
+    """ Инициализация при старте приложения. """
     try:
         # Убедитесь, что база данных доступна
         await create_database()
@@ -55,9 +61,7 @@ async def on_startup():
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """
-    Middleware для логирования запросов и измерения их времени.
-    """
+    """ Middleware для логирования запросов и измерения их времени. """
     start_time = time.time()
     response = await call_next(request)
     response_time = time.time() - start_time
@@ -68,29 +72,10 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
-    """Сохранение текста в Redis (если TTL короткий) или в БД."""
-    if ttl <= 3600:  # Если TTL <= 1 час
-        # Сохраняем текст в Redis (redis_text)
-        await redis.set(short_hash, text, ex=ttl)
-    else:
-        # Сохраняем текст в БД
-        db = await asyncpg.connect(DATABASE_URL_TEXT)
-        try:
-            query = """
-                INSERT INTO posts (hash, text, ttl, created_at)
-                VALUES ($1, $2, $3, $4)
-            """
-            await db.execute(query, short_hash, text, ttl, datetime.utcnow())
-        finally:
-            await db.close()
-
-
 @app.post("/create_post", response_model=CreatePostResponse)
 async def create_post(request: CreatePostRequest):
     try:
         # Генерация уникального хэша
-
         async with aiohttp.ClientSession() as session:
             async with session.get(HASH_SERVICE_URL) as response:
                 if response.status != 200:
@@ -112,15 +97,13 @@ async def create_post(request: CreatePostRequest):
 
 
 @app.get("/{short_hash}")
-async def get_post(short_hash: str, db=Depends(get_db)):
+async def get_post(short_hash: str):
     try:
-        # Сначала пытаемся получить текст из Redis (redis_text)
+        # Сначала пытаемся получить текст из Redis
         text = await redis.get(short_hash)
 
         if not text:
-            # Если текста нет в Redis, ищем его в БД
-            query = "SELECT text FROM posts WHERE hash = $1"
-            result = await db.fetchrow(query, short_hash)
+            result = await get_post_db(short_hash)
 
             if result:  # todo: Почему-то при переходе ссылкой на кеш, в логах дает 404. При юзе ендпоинта норм.
                 text = result["text"]

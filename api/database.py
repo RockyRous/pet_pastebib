@@ -1,21 +1,15 @@
 import os
+from datetime import datetime
+
 import asyncpg
-import redis.asyncio as redis
 import asyncio
+import redis.asyncio as redis
+
 from logging_config import logger
 
-# Инициализация BD
-# DATABASE_URL_TEXT = os.getenv("DATABASE_URL", "postgres://user:password@localhost:5432/pastebin_text")
+
+### SETTINGS
 DATABASE_URL_TEXT = os.getenv("DATABASE_URL", "postgres://user:password@localhost/pastebin_text")
-
-
-async def get_db():
-    """ Функция для получения подключения к базе данных """
-    conn = await asyncpg.connect(DATABASE_URL_TEXT)
-    try:
-        yield conn
-    finally:
-        await conn.close()
 
 
 async def create_database():
@@ -79,3 +73,28 @@ async def create_tables():
         logger.info("Таблицы успешно созданы или уже существуют.")
     finally:
         await conn.close()
+
+
+async def store_in_db(short_hash: str, text: str, ttl: int):
+    """ Сохраняем текст в БД """
+    db = await asyncpg.connect(DATABASE_URL_TEXT)
+    try:
+        query = """
+            INSERT INTO posts (hash, text, ttl, created_at)
+            VALUES ($1, $2, $3, $4)
+        """
+        await db.execute(query, short_hash, text, ttl, datetime.utcnow())
+    finally:
+        await db.close()
+
+
+async def get_post_db(short_hash: str):
+    """ Если текста нет в Redis, ищем его в БД """
+    db = await asyncpg.connect(DATABASE_URL_TEXT)
+    try:
+        query = "SELECT text FROM posts WHERE hash = $1"
+        result = await db.fetchrow(query, short_hash)
+        return result
+    finally:
+        await db.close()
+
