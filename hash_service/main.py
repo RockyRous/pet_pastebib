@@ -3,8 +3,10 @@ import base64
 import os
 import time
 import asyncpg
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from redis.asyncio import Redis
+
+from logging_config import logger, log_request
 
 app = FastAPI()
 
@@ -25,8 +27,23 @@ SEQUENCE_NAME = "my_sequence"
 redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """
+    Middleware для логирования запросов и измерения их времени.
+    """
+    start_time = time.time()
+    response = await call_next(request)
+    response_time = time.time() - start_time
+
+    # Логируем и добавляем метрики
+    log_request(request, response_time, response.status_code)
+
+    return response
+
+
 async def create_database():
-    print(f'DB url: {DB_DSN}')
+    logger.debug(f'DB url: {DB_DSN}')
     try:
         # Подключаемся к PostgreSQL, чтобы проверить наличие базы данных
         conn = await asyncpg.connect(DB_DSN.replace('pastebin_hash', 'postgres'))
@@ -34,10 +51,10 @@ async def create_database():
         result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_hash'")
         if not result:
             await conn.execute('CREATE DATABASE pastebin_hash')
-            print("Database 'pastebin_hash' created.")
+            logger.info("Database 'pastebin_hash' created.")
         await conn.close()
     except Exception as e:
-        print(f"Error creating database: {e}")
+        logger.error(f"Error creating database: {e}")
 
 
 def generate_hash(seq: int) -> str:
@@ -47,12 +64,12 @@ def generate_hash(seq: int) -> str:
 
 async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
     """ Повторная попытка с задержкой """
-    print('Повторная попытка с задержкой')
+    logger.debug('Повторная попытка с задержкой')
     for attempt in range(retries):
         try:
             return await func()
         except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
+            logger.warning(f"Attempt {attempt + 1} failed: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
             else:
@@ -61,7 +78,7 @@ async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
 
 async def fetch_batch_sequences(batch_size: int) -> list[int]:
     """ Получение партии сиквенсов из PostgreSQL """
-    print('Получение партии сиквенсов из PostgreSQL')
+    logger.debug('Получение партии сиквенсов из PostgreSQL')
     try:
         conn = await asyncpg.connect(DB_DSN)
         query = f"SELECT nextval($1) FROM generate_series(1, {batch_size})"
@@ -69,38 +86,37 @@ async def fetch_batch_sequences(batch_size: int) -> list[int]:
         return [row["nextval"] for row in result]
     finally:
         await conn.close()
-        print('Получение партии сиквенсов из PostgreSQL - complete')
 
 
 async def acquire_lock(redis_client, lock_key, lock_timeout):
     """ блокировки Redis """
-    print('блокировки Redis')
+    logger.debug('блокировки Redis')
     lock_value = str(time.time())  # Уникальное значение для блокировки
     try:
         is_set = await redis_client.set(lock_key, lock_value, nx=True, px=lock_timeout)
         return is_set, lock_value
     except Exception as e:
-        print(f"Error acquiring Redis lock: {e}")
+        logger.error(f"Error acquiring Redis lock: {e}")
         return False, None
 
 
 async def release_lock(redis_client, lock_key, lock_value):
     """ Освобождение блокировки Redis """
-    print('Освобождение блокировки Redis')
+    logger.debug('Освобождение блокировки Redis')
     try:
         current_value = await redis_client.get(lock_key)
         if current_value == lock_value:
             await redis_client.delete(lock_key)  # Удаляем блокировку
     except Exception as e:
-        print(f"Error releasing Redis lock: {e}")
+        logger.error(f"Error releasing Redis lock: {e}")
 
 
 async def populate_redis_cache():
     """ Наполнение кеша """
-    print('Наполнение кеша')
+    logger.debug('Наполнение кеша')
     lock_acquired, lock_value = await acquire_lock(redis_client, REDIS_LOCK_KEY, LOCK_TIMEOUT)
     if not lock_acquired:
-        print("Failed to acquire lock for cache population.")
+        logger.info("Failed to acquire lock for cache population.")
         return
 
     try:
@@ -111,41 +127,41 @@ async def populate_redis_cache():
         sequences = await retry_on_error(lambda: fetch_batch_sequences(BATCH_SIZE))
         hashes = [generate_hash(seq) for seq in sequences]
         await retry_on_error(lambda: redis_client.lpush(REDIS_HASH_KEY, *hashes))
-        print(f"Added {len(hashes)} hashes to Redis.")
+        logger.info(f"Added {len(hashes)} hashes to Redis.")
     except Exception as e:
-        print(f"Error populating Redis cache: {e}")
+        logger.error(f"Error populating Redis cache: {e}")
     finally:
         await release_lock(redis_client, REDIS_LOCK_KEY, lock_value)
 
 
 async def ensure_redis_cache():
     """ Проверка кеша и автоматическое пополнение """
-    print('Проверка кеша и автоматическое пополнение')
+    logger.debug('Проверка кеша и автоматическое пополнение')
     try:
         current_count = await redis_client.llen(REDIS_HASH_KEY)
         if current_count < CRITICAL_THRESHOLD:
             await populate_redis_cache()
     except Exception as e:
-        print(f"Error ensuring Redis cache: {e}")
+        logger.error(f"Error ensuring Redis cache: {e}")
 
 
 async def ensure_redis_cache_periodically():
     """ Фоновая задача для проверки кеша с ограничением времени ожидания """
-    print('Фоновая задача для проверки кеша с ограничением времени ожидания')
+    logger.debug('Фоновая задача для проверки кеша с ограничением времени ожидания')
     # while True:  # todo Разобраться как делать
     if True:
         try:
             await asyncio.wait_for(ensure_redis_cache(), timeout=10)  # Тайм-аут 10 секунд
             await asyncio.sleep(1)
         except asyncio.TimeoutError:
-            print("Timeout error occurred while ensuring Redis cache.")
+            logger.error("Timeout error occurred while ensuring Redis cache.")
         except Exception as e:
-            print(f"Background cache task failed: {e}")
+            logger.error(f"Background cache task failed: {e}")
 
 
 @app.get("/generate-hash")
 async def get_hash():
-    print('get_hash start')
+    logger.debug('get_hash start')
     try:
         # Проверяем и пополняем кеш при необходимости
         await ensure_redis_cache()
@@ -156,17 +172,17 @@ async def get_hash():
             return {"hash": hash_value}
 
         # Fallback на базу данных
-        print("Redis is empty. Generating hash directly from the database.")
+        logger.info("Redis is empty. Generating hash directly from the database.")
         sequences = await retry_on_error(lambda: fetch_batch_sequences(1))
         return {"hash": generate_hash(sequences[0])}
     except Exception as e:
-        print(f"Failed to generate hash: {e}")
+        logger.error(f"Failed to generate hash: {e}")
         return {"error": "Internal server error"}, 500
 
 
 async def check_and_create_sequence():
     """ Проверка существования последовательности и её создание, если необходимо """
-    print('Проверка существования последовательности и её создание, если необходимо')
+    logger.debug('Проверка существования последовательности и её создание, если необходимо')
     try:
         conn = await asyncpg.connect(DB_DSN)
         # Проверка, существует ли последовательность
@@ -181,7 +197,7 @@ async def check_and_create_sequence():
 
         # Если последовательности нет, создаём её
         if not result[0]["exists"]:
-            print(f"Sequence '{SEQUENCE_NAME}' does not exist. Creating it...")
+            logger.info(f"Sequence '{SEQUENCE_NAME}' does not exist. Creating it...")
             await conn.execute(f"""
                 CREATE SEQUENCE {SEQUENCE_NAME}
                 START WITH 1
@@ -190,11 +206,11 @@ async def check_and_create_sequence():
                 NO MAXVALUE
                 CACHE 1;
             """)
-            print(f"Sequence '{SEQUENCE_NAME}' created successfully.")
+            logger.info(f"Sequence '{SEQUENCE_NAME}' created successfully.")
         else:
-            print(f"Sequence '{SEQUENCE_NAME}' already exists.")
+            logger.info(f"Sequence '{SEQUENCE_NAME}' already exists.")
     except Exception as e:
-        print(f"Error checking or creating sequence: {e}")
+        logger.error(f"Error checking or creating sequence: {e}")
     finally:
         await conn.close()
 
@@ -202,26 +218,26 @@ async def check_and_create_sequence():
 @app.on_event("startup")
 async def startup():
     """ Инициализация приложения """
-    print('Инициализация приложения')
+    logger.debug('Инициализация приложения')
     try:
         await create_database()
 
         await check_and_create_sequence()
-        print("Checked and created sequence.")
+        logger.info("Checked and created sequence.")
 
         # Redis
         await asyncio.create_task(ensure_redis_cache_periodically())
-        print("Application started successfully.")
+        logger.info("Application started successfully.")
     except Exception as e:
-        print(f"Failed to start application: {e}")
+        logger.error(f"Failed to start application: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    print('shutdown')
+    logger.debug('shutdown')
     try:
         if redis_client:
             await redis_client.close()
-        print("Application shut down cleanly.")
+        logger.info("Application shut down cleanly.")
     except Exception as e:
-        print(f"Error during shutdown: {e}")
+        logger.info(f"Error during shutdown: {e}")

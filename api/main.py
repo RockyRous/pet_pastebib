@@ -1,16 +1,23 @@
+import time
 from datetime import datetime, timedelta
 from os import getenv
 
 import aiohttp
 import asyncpg
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from db import create_tables, get_db, ensure_db_ready, ensure_redis_ready, DATABASE_URL_TEXT, create_database
+from logging_config import log_request, logger
 
 # Настройка
 app = FastAPI()
+
+# logger.info("Пример лога")
+# logger.debug("Пример лога")
+# logger.warning("Пример варнинга")
+# logger.error("Пример ошибки")
 
 # Инициализация Redis
 REDIS_URL_TEXT = getenv('REDIS_URL_TEXT', default="redis://172.18.0.3/0")
@@ -43,7 +50,22 @@ async def on_startup():
         global redis
         redis = await ensure_redis_ready(REDIS_URL_TEXT)
     except Exception as e:
-        print(f"Ошибка при старте приложения: {e}")
+        logger.error(f"Ошибка при старте приложения: {e}")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """
+    Middleware для логирования запросов и измерения их времени.
+    """
+    start_time = time.time()
+    response = await call_next(request)
+    response_time = time.time() - start_time
+
+    # Логируем и добавляем метрики
+    log_request(request, response_time, response.status_code)
+
+    return response
 
 
 async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
@@ -85,7 +107,7 @@ async def create_post(request: CreatePostRequest):
 
         return {"short_url": short_url}
     except Exception as e:
-        print(f"Ошибка в create_post: {e}")
+        logger.error(f"Ошибка в create_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -110,5 +132,5 @@ async def get_post(short_hash: str, db=Depends(get_db)):
 
         return {"text": text}
     except Exception as e:
-        print(f"Ошибка в get_post: {e}")
+        logger.error(f"Ошибка в get_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
