@@ -45,6 +45,7 @@ async def ensure_redis_ready(redis_url, retries=5, delay=2):
                 await asyncio.sleep(delay)
     raise Exception(f"Не удалось подключиться к Redis: {redis_url}")
 
+
 async def ensure_db_ready(retries=5, delay=2):
     """Проверка доступности базы данных с ретри-механизмом."""
     for attempt in range(retries):

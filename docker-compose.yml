@@ -5,11 +5,8 @@ services:
       context: ./api
       dockerfile: Dockerfile
     container_name: api-service
-    environment:
-#      DATABASE_URL: postgres://user:password@postgres_text:5432/pastebin_text
-      DATABASE_URL: postgres://user:password@postgres_text/pastebin_text
-      REDIS_URL_TEXT: redis://redis_text/0
-      HASH_SERVICE_URL: http://hash-service:8002/generate-hash
+    env_file:
+      - .env
     depends_on:
       - postgres_text
       - redis_text
@@ -26,10 +23,8 @@ services:
     container_name: hash-service
     ports:
       - "8002:8002"
-    environment:
-#      DATABASE_URL: postgres://user:password@postgres_hash:5432/pastebin_hash
-      DATABASE_URL: postgres://user:password@postgres_hash/pastebin_hash
-      REDIS_URL_HASH: redis://redis_hash/0
+    env_file:
+      - .env
     depends_on:
       - postgres_hash
       - redis_hash
@@ -58,14 +53,16 @@ services:
     image: postgres:16-alpine
     container_name: postgres_text
     restart: always
-#    ports:
-#      - "5432:5432"
-    environment:
+#    build:
+#      context: ./postgreSQL
+#      dockerfile: Dockerfile  # Использовать докер файл, для запуска конфига бд
+    environment:  # todo Пробовать с енв
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_text
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - ./init_text.sql:/docker-entrypoint-initdb.d/init.sql
+      - pg_data_text:/var/lib/postgresql/data
     networks:
       - api_network
 
@@ -73,20 +70,24 @@ services:
     image: postgres:16-alpine
     container_name: postgres_hash
     restart: always
-#    ports:
-#      - "5433:5432"
-    environment:
+    #    build:
+    #      context: ./postgreSQL
+    #      dockerfile: Dockerfile  # Использовать докер файл, для запуска конфига бд
+    environment:  # todo Пробовать с енв
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_hash
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - ./init_hash.sql:/docker-entrypoint-initdb.d/init.sql  # fixme: Есть ошибка или не отрабатывает (хэш сам делает последовательность)
+      - pg_data_hash:/var/lib/postgresql/data
     networks:
       - hash_network
 
 
 volumes:
-  pg_data:
+  pg_data_text:
+    driver: local
+  pg_data_hash:
     driver: local
 
 networks:
