@@ -1,7 +1,7 @@
 fastapi
 uvicorn
+redis
 aiohttp
 pydantic
 asyncio
 asyncpg
-redis
