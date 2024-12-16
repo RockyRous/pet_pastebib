@@ -1,12 +1,15 @@
 import time
 from datetime import datetime
 from os import getenv
+import json
 
 import aiohttp
 import asyncpg
 from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
+import pika
 
 from database import create_tables, ensure_db_ready, ensure_redis_ready, create_database, store_in_db, get_post_db
 from logging_config import log_request, logger
@@ -72,6 +75,11 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/docs")
+
+
 @app.post("/create_post", response_model=CreatePostResponse)
 async def create_post(request: CreatePostRequest):
     try:
@@ -88,7 +96,7 @@ async def create_post(request: CreatePostRequest):
         await store_in_redis_or_db(short_hash, request.text, request.ttl)
 
         # Генерация короткой ссылки
-        short_url = f"http://localhost:8001/{short_hash}"
+        short_url = f"http://localhost:8001/get/{short_hash}"
 
         return {"short_url": short_url}
     except Exception as e:
@@ -96,7 +104,7 @@ async def create_post(request: CreatePostRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/{short_hash}")
+@app.get("/get/{short_hash}")
 async def get_post(short_hash: str):
     try:
         # Сначала пытаемся получить текст из Redis
@@ -105,7 +113,7 @@ async def get_post(short_hash: str):
         if not text:
             result = await get_post_db(short_hash)
 
-            if result:  # todo: Почему-то при переходе ссылкой на кеш, в логах дает 404. При юзе ендпоинта норм.
+            if result:
                 text = result["text"]
 
                 # Кэшируем текст в Redis (redis_text)

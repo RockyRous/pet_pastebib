@@ -4,6 +4,7 @@ import time
 import asyncio
 import base64
 from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
 
 from logging_config import logger, log_request
@@ -143,6 +144,11 @@ async def log_requests(request: Request, call_next):
     log_request(request, response_time, response.status_code)
 
     return response
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/generate-hash")

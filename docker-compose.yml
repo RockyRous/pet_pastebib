@@ -31,6 +31,33 @@ services:
     networks:
       - hash_network
 
+  # Worker and rabbit
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: worker
+    env_file:
+      - .env
+    depends_on:
+      - rabbitmq
+      - postgres_text
+
+  rabbitmq:
+    image: rabbitmq:3.9-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    command: >
+      sh -c "rabbitmq-plugins enable rabbitmq_delayed_message_exchange && rabbitmq-server"
+      
+
 
   # Redis
   redis_text:
@@ -88,6 +115,8 @@ volumes:
   pg_data_text:
     driver: local
   pg_data_hash:
+    driver: local
+  rabbitmq-data:
     driver: local
 
 networks:

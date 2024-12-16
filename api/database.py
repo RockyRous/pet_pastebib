@@ -1,15 +1,20 @@
 import os
 from datetime import datetime
+import json
 
 import asyncpg
 import asyncio
 import redis.asyncio as redis
+import pika
 
 from logging_config import logger
 
 
 ### SETTINGS
-DATABASE_URL_TEXT = os.getenv("DATABASE_URL", "postgres://user:password@localhost/pastebin_text")
+DATABASE_URL_TEXT = os.getenv("DATABASE_URL_TEXT", "postgres://user:password@localhost/pastebin_text")
+# Настройка RabbitMQ
+RABBITMQ_HOST = "localhost"
+EXCHANGE_NAME = "delayed_exchange"
 
 
 async def create_database():
@@ -84,6 +89,10 @@ async def store_in_db(short_hash: str, text: str, ttl: int):
             VALUES ($1, $2, $3, $4)
         """
         await db.execute(query, short_hash, text, ttl, datetime.utcnow())
+
+        # Публикация сообщения в RabbitMQ
+        publish_message(short_hash, ttl)
+
     finally:
         await db.close()
 
@@ -98,3 +107,31 @@ async def get_post_db(short_hash: str):
     finally:
         await db.close()
 
+
+def get_rabbit_connection():
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+    return connection
+
+
+def publish_message(hash: str, ttl: int):
+    connection = get_rabbit_connection()
+    channel = connection.channel()
+
+    # Создание обменника с типом x-delayed-message
+    channel.exchange_declare(
+        exchange=EXCHANGE_NAME,
+        exchange_type="x-delayed-message",
+        arguments={"x-delayed-type": "direct"}
+    )
+
+    # Публикация сообщения с задержкой
+    message = {"hash": hash}
+    channel.basic_publish(
+        exchange=EXCHANGE_NAME,
+        routing_key="delete_key",
+        body=json.dumps(message),
+        properties=pika.BasicProperties(
+            headers={"x-delay": ttl * 1000}  # Задержка в миллисекундах
+        ),
+    )
+    connection.close()

@@ -1,8 +1,5 @@
 fastapi
 uvicorn
-aiohttp
-pydantic
 asyncio
 asyncpg
-redis
 pika
