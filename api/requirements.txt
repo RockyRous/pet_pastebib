@@ -6,3 +6,4 @@ asyncio
 asyncpg
 redis
 pika
+prometheus_client

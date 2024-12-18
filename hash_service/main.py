@@ -3,9 +3,10 @@ import time
 
 import asyncio
 import base64
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
+from prometheus_client import generate_latest, REGISTRY
 
 from logging_config import logger, log_request
 from database import fetch_batch_sequences, create_database, check_and_create_sequence
@@ -138,14 +139,24 @@ async def startup():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """ Middleware для логирования запросов и измерения их времени. """
+    logger.debug(f"Processing request: {request.method} {request.url}")
     start_time = time.time()
     response = await call_next(request)
     response_time = time.time() - start_time
 
     # Логируем и добавляем метрики
     log_request(request, response_time, response.status_code)
+    logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
 
     return response
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
+    """
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @app.get("/")

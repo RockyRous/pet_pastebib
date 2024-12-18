@@ -1,8 +1,9 @@
 import time
 from os import getenv
 
+from prometheus_client import generate_latest, REGISTRY
 import aiohttp
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
@@ -83,6 +84,14 @@ async def log_requests(request: Request, call_next):
     logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
 
     return response
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
+    """
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @app.get("/")
