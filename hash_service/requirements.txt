@@ -5,3 +5,4 @@ aiohttp
 pydantic
 asyncio
 asyncpg
+prometheus_client

@@ -31,6 +31,33 @@ services:
     networks:
       - hash_network
 
+  # Worker and rabbit
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: worker
+    env_file:
+      - .env
+    depends_on:
+      - rabbitmq
+      - postgres_text
+    networks:
+      - api_network
+
+  rabbitmq:
+      build: ./rabbitMQ
+      container_name: rabbitmq
+      environment:
+        RABBITMQ_DEFAULT_USER: user
+        RABBITMQ_DEFAULT_PASS: password
+      ports:
+        - "5672:5672"
+        - "15672:15672"
+      volumes:
+        - rabbitmq-data:/var/lib/rabbitmq
+      networks:
+        - api_network
 
   # Redis
   redis_text:
@@ -61,7 +88,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_text
     volumes:
-      - ./init_text.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgreSQL/init_text.sql:/docker-entrypoint-initdb.d/init.sql
       - pg_data_text:/var/lib/postgresql/data
     networks:
       - api_network
@@ -78,16 +105,43 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_hash
     volumes:
-      - ./init_hash.sql:/docker-entrypoint-initdb.d/init.sql  # fixme: Есть ошибка или не отрабатывает (хэш сам делает последовательность)
+      - ./postgreSQL/init_hash.sql:/docker-entrypoint-initdb.d/init.sql
       - pg_data_hash:/var/lib/postgresql/data
     networks:
       - hash_network
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - api_network
+      - hash_network
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - api_network
 
 
 volumes:
   pg_data_text:
     driver: local
   pg_data_hash:
+    driver: local
+  rabbitmq-data:
     driver: local
 
 networks:

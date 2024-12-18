@@ -4,7 +4,7 @@ import asyncpg
 from logging_config import logger
 
 ### SETTINGS
-DB_DSN = os.getenv("DATABASE_URL", "postgres://user:password@localhost/pastebin_hash")
+DB_DSN = os.getenv("DATABASE_URL_HASH", "postgres://user:password@localhost/pastebin_hash")
 SEQUENCE_NAME = "my_sequence"  # Название очереди # todo: rename
 
 

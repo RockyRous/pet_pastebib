@@ -3,8 +3,10 @@ import time
 
 import asyncio
 import base64
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 from redis.asyncio import Redis
+from prometheus_client import generate_latest, REGISTRY
 
 from logging_config import logger, log_request
 from database import fetch_batch_sequences, create_database, check_and_create_sequence
@@ -104,11 +106,11 @@ async def ensure_redis_cache():
 async def ensure_redis_cache_periodically():
     """ Фоновая задача для проверки кеша с ограничением времени ожидания """
     logger.debug('Фоновая задача для проверки кеша с ограничением времени ожидания')
-    # while True:  # todo Разобраться как делать
-    if True:
+    while True:
         try:
+            logger.debug('ensure_redis_cache_periodically start')  # fixme я не понимаю работает ли этот блок
             await asyncio.wait_for(ensure_redis_cache(), timeout=10)  # Тайм-аут 10 секунд
-            await asyncio.sleep(1)
+            await asyncio.sleep(6)  # Задержка в 60 секунд перед следующей проверкой # todo: Вынести параметр в енв
         except asyncio.TimeoutError:
             logger.error("Timeout error occurred while ensuring Redis cache.")
         except Exception as e:
@@ -125,8 +127,10 @@ async def startup():
         await check_and_create_sequence()
         logger.info("Checked and created sequence.")
 
-        # Redis
-        await asyncio.create_task(ensure_redis_cache_periodically())
+        # Запуск фоновой задачи для периодической проверки кеша
+        asyncio.create_task(ensure_redis_cache_periodically())  # Запуск фоновой задачи
+        logger.info("Background task for cache checking started.")
+
         logger.info("Application started successfully.")
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
@@ -135,14 +139,29 @@ async def startup():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """ Middleware для логирования запросов и измерения их времени. """
+    logger.debug(f"Processing request: {request.method} {request.url}")
     start_time = time.time()
     response = await call_next(request)
     response_time = time.time() - start_time
 
     # Логируем и добавляем метрики
     log_request(request, response_time, response.status_code)
+    logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
 
     return response
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
+    """
+    return Response(generate_latest(REGISTRY), media_type="text/plain")
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/generate-hash")

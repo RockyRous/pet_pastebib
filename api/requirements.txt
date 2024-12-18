@@ -5,3 +5,5 @@ pydantic
 asyncio
 asyncpg
 redis
+pika
+prometheus_client
