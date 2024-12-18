@@ -105,11 +105,11 @@ async def ensure_redis_cache():
 async def ensure_redis_cache_periodically():
     """ Фоновая задача для проверки кеша с ограничением времени ожидания """
     logger.debug('Фоновая задача для проверки кеша с ограничением времени ожидания')
-    # while True:  # todo Разобраться как делать
-    if True:
+    while True:
         try:
+            logger.debug('ensure_redis_cache_periodically start')  # fixme я не понимаю работает ли этот блок
             await asyncio.wait_for(ensure_redis_cache(), timeout=10)  # Тайм-аут 10 секунд
-            await asyncio.sleep(1)
+            await asyncio.sleep(6)  # Задержка в 60 секунд перед следующей проверкой # todo: Вынести параметр в енв
         except asyncio.TimeoutError:
             logger.error("Timeout error occurred while ensuring Redis cache.")
         except Exception as e:
@@ -126,8 +126,10 @@ async def startup():
         await check_and_create_sequence()
         logger.info("Checked and created sequence.")
 
-        # Redis
-        await asyncio.create_task(ensure_redis_cache_periodically())
+        # Запуск фоновой задачи для периодической проверки кеша
+        asyncio.create_task(ensure_redis_cache_periodically())  # Запуск фоновой задачи
+        logger.info("Background task for cache checking started.")
+
         logger.info("Application started successfully.")
     except Exception as e:
         logger.error(f"Failed to start application: {e}")
