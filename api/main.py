@@ -1,15 +1,11 @@
 import time
-from datetime import datetime
 from os import getenv
-import json
 
 import aiohttp
-import asyncpg
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-import pika
 
 from database import create_tables, ensure_db_ready, ensure_redis_ready, create_database, store_in_db, get_post_db
 from logging_config import log_request, logger
@@ -37,27 +33,39 @@ class CreatePostResponse(BaseModel):
 ### UTILS
 async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
     """Сохранение текста в Redis (если TTL короткий) или в БД."""
-    if ttl <= 3600:  # Если TTL <= 1 час
-        # Сохраняем текст в Redis (redis_text)
-        await redis.set(short_hash, text, ex=ttl)
+    logger.debug(f"Storing text with hash={short_hash}, ttl={ttl}")
+    if ttl <= 10:  #3600:  # Если TTL <= 1 час
+        try:
+            await redis.set(short_hash, text, ex=ttl)
+            logger.info(f"Text stored in Redis with hash={short_hash}")
+        except Exception as e:
+            logger.error(f"Error storing text in Redis: {e}")
     else:
-        # Сохраняем текст в БД
-        await store_in_db(short_hash, text, ttl)
+        try:
+            await store_in_db(short_hash, text, ttl)
+            logger.info(f"Text stored in database with hash={short_hash}")
+        except Exception as e:
+            logger.error(f"Error storing text in database: {e}")
 
 
 ### ENDPOINTS
 @app.on_event("startup")
 async def on_startup():
     """ Инициализация при старте приложения. """
+    logger.debug("Starting application initialization.")
     try:
         # Убедитесь, что база данных доступна
         await create_database()
+        logger.info("Database created successfully.")
         await ensure_db_ready()
+        logger.info("Database is ready.")
         await create_tables()
+        logger.info("Tables are created.")
 
         # Убедитесь, что Redis доступен
         global redis
         redis = await ensure_redis_ready(REDIS_URL_TEXT)
+        logger.info("Redis is ready.")
     except Exception as e:
         logger.error(f"Ошибка при старте приложения: {e}")
 
@@ -65,38 +73,46 @@ async def on_startup():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """ Middleware для логирования запросов и измерения их времени. """
+    logger.debug(f"Processing request: {request.method} {request.url}")
     start_time = time.time()
     response = await call_next(request)
     response_time = time.time() - start_time
 
     # Логируем и добавляем метрики
     log_request(request, response_time, response.status_code)
+    logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
 
     return response
 
 
 @app.get("/")
 async def root():
+    logger.debug("Redirecting to /docs.")
     return RedirectResponse(url="/docs")
 
 
 @app.post("/create_post", response_model=CreatePostResponse)
 async def create_post(request: CreatePostRequest):
+    logger.debug(f"Received create_post request: {request}")
     try:
         # Генерация уникального хэша
         async with aiohttp.ClientSession() as session:
             async with session.get(HASH_SERVICE_URL) as response:
                 if response.status != 200:
+                    error_detail = await response.text()
+                    logger.error(f"Hash service error: {error_detail}")
                     raise HTTPException(status_code=response.status,
-                                        detail=f"Error from hash service: {await response.text()}")
+                                        detail=f"Error from hash service: {error_detail}")
                 data = await response.json()
                 short_hash = data['hash']
+                logger.info(f"Hash generated: {short_hash}")
 
         # Сохранение в Redis или БД
         await store_in_redis_or_db(short_hash, request.text, request.ttl)
 
         # Генерация короткой ссылки
         short_url = f"http://localhost:8001/get/{short_hash}"
+        logger.info(f"Short URL created: {short_url}")
 
         return {"short_url": short_url}
     except Exception as e:
@@ -106,19 +122,24 @@ async def create_post(request: CreatePostRequest):
 
 @app.get("/get/{short_hash}")
 async def get_post(short_hash: str):
+    logger.debug(f"Received get_post request for hash={short_hash}")
     try:
         # Сначала пытаемся получить текст из Redis
         text = await redis.get(short_hash)
 
         if not text:
+            logger.info(f"Hash {short_hash} not found in Redis, checking database.")
             result = await get_post_db(short_hash)
 
             if result:
                 text = result["text"]
+                logger.info(f"Hash {short_hash} found in database.")
 
                 # Кэшируем текст в Redis (redis_text)
                 await redis.set(short_hash, text, ex=600)  # TTL = 600 секунд
+                logger.info(f"Hash {short_hash} cached in Redis with TTL=600s.")
             else:
+                logger.warning(f"Hash {short_hash} not found in database.")
                 raise HTTPException(status_code=404, detail="Post not found")
 
         return {"text": text}

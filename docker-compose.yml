@@ -42,22 +42,22 @@ services:
     depends_on:
       - rabbitmq
       - postgres_text
+    networks:
+      - api_network
 
   rabbitmq:
-    image: rabbitmq:3.9-management
-    container_name: rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: user
-      RABBITMQ_DEFAULT_PASS: password
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-    command: >
-      sh -c "rabbitmq-plugins enable rabbitmq_delayed_message_exchange && rabbitmq-server"
-      
-
+      build: ./rabbitMQ
+      container_name: rabbitmq
+      environment:
+        RABBITMQ_DEFAULT_USER: user
+        RABBITMQ_DEFAULT_PASS: password
+      ports:
+        - "5672:5672"
+        - "15672:15672"
+      volumes:
+        - rabbitmq-data:/var/lib/rabbitmq
+      networks:
+        - api_network
 
   # Redis
   redis_text:
@@ -88,7 +88,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_text
     volumes:
-      - ./init_text.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgreSQL/init_text.sql:/docker-entrypoint-initdb.d/init.sql
       - pg_data_text:/var/lib/postgresql/data
     networks:
       - api_network
@@ -105,7 +105,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_hash
     volumes:
-      - ./init_hash.sql:/docker-entrypoint-initdb.d/init.sql  # fixme: Есть ошибка или не отрабатывает (хэш сам делает последовательность)
+      - ./postgreSQL/init_hash.sql:/docker-entrypoint-initdb.d/init.sql
       - pg_data_hash:/var/lib/postgresql/data
     networks:
       - hash_network

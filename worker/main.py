@@ -1,4 +1,6 @@
 import os
+import time
+
 import pika
 import json
 import asyncio
@@ -7,8 +9,10 @@ import logging
 
 # Настройки из переменных окружения
 DATABASE_URL = os.getenv("DATABASE_URL_TEXT")
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 EXCHANGE_NAME = os.getenv("EXCHANGE_NAME", "delayed_exchange")
+credentials = pika.PlainCredentials('user', 'password') # todo: Тоже получать из енв
+connection_params = pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
 
 # Настройка логгера
 logging.basicConfig(level=logging.INFO)
@@ -65,7 +69,17 @@ def main():
     try:
         # Настройка RabbitMQ соединения
         logger.info(f"Connecting to RabbitMQ at {RABBITMQ_HOST}...")
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+
+        for i in range(5):
+            try:
+                connection = pika.BlockingConnection(connection_params)
+                break
+            except Exception:
+                logger.warning(f"Attempt {i + 1}: RabbitMQ is not ready. Retrying in 5 seconds...")
+                time.sleep(5)
+        else:
+            raise RuntimeError("Unable to connect to RabbitMQ")
+
         channel = connection.channel()
 
         # Объявляем обменник с типом x-delayed-message
