@@ -23,7 +23,7 @@ HASH_SERVICE_URL = getenv('HASH_SERVICE_URL', default="http://hash-service:8002/
 
 ### Pydantic Models
 class CreatePostRequest(BaseModel):
-    text: str = Field(..., max_length=500)
+    text: str = Field(..., max_length=4500)
     ttl: int = Field(..., gt=0)
 
 
@@ -57,7 +57,6 @@ async def on_startup():
     try:
         # Убедитесь, что база данных доступна
         await create_database()
-        logger.info("Database created successfully.")
         await ensure_db_ready()
         logger.info("Database is ready.")
         await create_tables()
@@ -68,7 +67,7 @@ async def on_startup():
         redis = await ensure_redis_ready(REDIS_URL_TEXT)
         logger.info("Redis is ready.")
     except Exception as e:
-        logger.error(f"Ошибка при старте приложения: {e}")
+        logger.error(f"Error when starting the application: {e}")
 
 
 @app.middleware("http")
@@ -109,7 +108,7 @@ async def create_post(request: CreatePostRequest):
             async with session.get(HASH_SERVICE_URL) as response:
                 if response.status != 200:
                     error_detail = await response.text()
-                    logger.error(f"Hash service error: {error_detail}")
+                    logger().error(f"Hash service error: {error_detail}")
                     raise HTTPException(status_code=response.status,
                                         detail=f"Error from hash service: {error_detail}")
                 data = await response.json()
@@ -121,11 +120,10 @@ async def create_post(request: CreatePostRequest):
 
         # Генерация короткой ссылки
         short_url = f"http://localhost:8001/get/{short_hash}"
-        logger.info(f"Short URL created: {short_url}")
 
         return {"short_url": short_url}
     except Exception as e:
-        logger.error(f"Ошибка в create_post: {e}")
+        logger.error(f"Error in create_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -142,7 +140,6 @@ async def get_post(short_hash: str):
 
             if result:
                 text = result["text"]
-                logger.info(f"Hash {short_hash} found in database.")
 
                 # Кэшируем текст в Redis (redis_text)
                 await redis.set(short_hash, text, ex=600)  # TTL = 600 секунд
