@@ -28,7 +28,7 @@ async def create_database():
             await conn.execute('CREATE DATABASE pastebin_text')
             logger.info("Database 'pastebin_text' created.")
         else:
-            conn.info("Database 'pastebin_text' already exists.")
+            logger.info("Database 'pastebin_text' already exists.")
         await conn.close()
     except Exception as e:
         logger.error(f"Error creating database: {e}")
