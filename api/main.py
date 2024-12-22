@@ -108,7 +108,7 @@ async def create_post(request: CreatePostRequest):
             async with session.get(HASH_SERVICE_URL) as response:
                 if response.status != 200:
                     error_detail = await response.text()
-                    logger().error(f"Hash service error: {error_detail}")
+                    logger.error(f"Hash service error: {error_detail}")
                     raise HTTPException(status_code=response.status,
                                         detail=f"Error from hash service: {error_detail}")
                 data = await response.json()

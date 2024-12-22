@@ -1,5 +1,6 @@
 import logging
 import sys
+import os
 from logging.handlers import RotatingFileHandler
 from prometheus_client import Counter, Histogram
 
@@ -10,23 +11,27 @@ def config_log(level=logging.DEBUG):
         datefmt='%d-%m-%Y %H:%M:%S'
     )
 
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    logs_dir = os.path.join(current_dir, 'logs')
+
+    os.makedirs(logs_dir, exist_ok=True)
+
+    debug_log_path = os.path.join(logs_dir, 'debug_logs.log')
+    info_log_path = os.path.join(logs_dir, 'info_logs.log')
+
     logger = logging.getLogger("custom_logger")
     logger.setLevel(level)
 
-    # Обработчик для DEBUG-логов с ротацией
-    debug_handler = RotatingFileHandler(r"D:\Python\pet_pastebib\api\logs\debug_logs.log", maxBytes=10 * 1024 * 1024,
-                                        backupCount=3)
+    debug_handler = RotatingFileHandler(debug_log_path, maxBytes=10 * 1024 * 1024, backupCount=3)
     debug_handler.setLevel(logging.DEBUG)
     debug_handler.setFormatter(formatter)
-
-    info_handler = RotatingFileHandler(r"D:\Python\pet_pastebib\api\logs\info_logs.log", maxBytes=10 * 1024 * 1024,
-                                       backupCount=5)
-    info_handler.setLevel(logging.INFO)  # Логи уровня INFO и выше
-    info_handler.setFormatter(formatter)
-
     debug_handler.addFilter(lambda record: record.levelno == logging.DEBUG)
 
-    # Добавляем обработчики к логгеру
+    info_handler = RotatingFileHandler(info_log_path, maxBytes=10 * 1024 * 1024, backupCount=5)
+    info_handler.setLevel(logging.INFO)
+    info_handler.setFormatter(formatter)
+
     logger.addHandler(debug_handler)
     logger.addHandler(info_handler)
 
@@ -59,3 +64,4 @@ def log_request(request, response_time, status_code):
     # Логируем информацию о запросе
     logger.debug(f"Request to {request.url} completed with status {status_code}")
     logger.info(f"Request to {request.url} completed with status {status_code}")
+
