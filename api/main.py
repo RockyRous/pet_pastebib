@@ -38,13 +38,11 @@ async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
     if ttl <= 3600:  # Если TTL <= 1 час
         try:
             await redis.set(short_hash, text, ex=ttl)
-            logger.info(f"Text stored in Redis with hash={short_hash}")
         except Exception as e:
             logger.error(f"Error storing text in Redis: {e}")
     else:
         try:
             await store_in_db(short_hash, text, ttl)
-            logger.info(f"Text stored in database with hash={short_hash}")
         except Exception as e:
             logger.error(f"Error storing text in database: {e}")
 
@@ -53,7 +51,6 @@ async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
 @app.on_event("startup")
 async def on_startup():
     """ Инициализация при старте приложения. """
-    logger.debug("Starting application initialization.")
     try:
         # Убедитесь, что база данных доступна
         await create_database()
@@ -65,7 +62,6 @@ async def on_startup():
         # Убедитесь, что Redis доступен
         global redis
         redis = await ensure_redis_ready(REDIS_URL_TEXT)
-        logger.info("Redis is ready.")
     except Exception as e:
         logger.error(f"Error when starting the application: {e}")
 
@@ -107,12 +103,10 @@ async def create_post(request: CreatePostRequest):
             async with session.get(HASH_SERVICE_URL) as response:
                 if response.status != 200:
                     error_detail = await response.text()
-                    logger.error(f"Hash service error: {error_detail}")
                     raise HTTPException(status_code=response.status,
                                         detail=f"Error from hash service: {error_detail}")
                 data = await response.json()
                 short_hash = data['hash']
-                logger.info(f"Hash generated: {short_hash}")
 
         # Сохранение в Redis или БД
         await store_in_redis_or_db(short_hash, request.text, request.ttl)

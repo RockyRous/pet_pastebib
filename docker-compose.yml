@@ -143,6 +143,7 @@ volumes:
     driver: local
   rabbitmq-data:
     driver: local
+     - ./logs:/app/logs
 
 networks:
   api_network:
