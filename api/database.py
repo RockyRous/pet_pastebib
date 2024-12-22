@@ -26,7 +26,6 @@ async def create_database():
         result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_text'")
         if not result:
             await conn.execute('CREATE DATABASE pastebin_text')
-            logger.info("Database 'pastebin_text' created.")
         else:
             logger.info("Database 'pastebin_text' already exists.")
         await conn.close()
@@ -40,34 +39,29 @@ async def ensure_redis_ready(redis_url, retries=5, delay=2):
         try:
             redis_client = redis.from_url(redis_url, decode_responses=True)
             await redis_client.ping()
-            logger.info(f"Redis доступен: {redis_url}")
             return redis_client
         except Exception as e:
-            logger.warning(f"Попытка {attempt + 1}/{retries} подключения к {redis_url} не удалась: {e}")
+            logger.warning(f"Attempt {attempt + 1}/{retries} to connect to {redis_url} failed: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
-    logger.error(f"Не удалось подключиться к Redis: {redis_url}")
-    raise Exception(f"Не удалось подключиться к Redis: {redis_url}")
+    raise Exception(f"Failed to connect to Redis: {redis_url}")
 
 
 async def ensure_db_ready(retries=5, delay=2):
-    logger.debug("Checking database readiness.")
+    logger().debug("Checking database readiness.")
     for attempt in range(retries):
         try:
             conn = await asyncpg.connect(DATABASE_URL_TEXT)
             await conn.close()
-            logger.info("База данных доступна.")
             return
         except Exception as e:
-            logger.warning(f"Попытка {attempt + 1}/{retries} подключения к базе данных не удалась: {e}")
+            logger.warning(f"Attempt {attempt + 1}/{retries} to connect to database failed: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
-    logger.error("Не удалось подключиться к базе данных.")
-    raise Exception("Не удалось подключиться к базе данных.")
+    raise Exception("Failed to connect to the database.")
 
 
 async def create_tables():
-    logger.debug("Starting table creation process.")
     conn = await asyncpg.connect(DATABASE_URL_TEXT)
     try:
         await conn.execute("""
@@ -78,7 +72,7 @@ async def create_tables():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        logger.info("Таблицы успешно созданы или уже существуют.")
+        logger.info("Tables were created successfully or already exist.")
     except Exception as e:
         logger.error(f"Error creating tables: {e}")
     finally:
@@ -94,7 +88,6 @@ async def store_in_db(short_hash: str, text: str, ttl: int):
             VALUES ($1, $2, $3, $4)
         """
         await db.execute(query, short_hash, text, ttl, datetime.utcnow())
-        logger.info(f"Data stored in database for hash={short_hash}.")
 
         publish_message(short_hash, ttl)
     except Exception as e:

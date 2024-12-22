@@ -23,7 +23,7 @@ HASH_SERVICE_URL = getenv('HASH_SERVICE_URL', default="http://hash-service:8002/
 
 ### Pydantic Models
 class CreatePostRequest(BaseModel):
-    text: str = Field(..., max_length=500)
+    text: str = Field(..., max_length=4500)
     ttl: int = Field(..., gt=0)
 
 
@@ -35,16 +35,14 @@ class CreatePostResponse(BaseModel):
 async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
     """Сохранение текста в Redis (если TTL короткий) или в БД."""
     logger.debug(f"Storing text with hash={short_hash}, ttl={ttl}")
-    if ttl <= 10:  #3600:  # Если TTL <= 1 час
+    if ttl <= 3600:  # Если TTL <= 1 час
         try:
             await redis.set(short_hash, text, ex=ttl)
-            logger.info(f"Text stored in Redis with hash={short_hash}")
         except Exception as e:
             logger.error(f"Error storing text in Redis: {e}")
     else:
         try:
             await store_in_db(short_hash, text, ttl)
-            logger.info(f"Text stored in database with hash={short_hash}")
         except Exception as e:
             logger.error(f"Error storing text in database: {e}")
 
@@ -53,11 +51,9 @@ async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
 @app.on_event("startup")
 async def on_startup():
     """ Инициализация при старте приложения. """
-    logger.debug("Starting application initialization.")
     try:
         # Убедитесь, что база данных доступна
         await create_database()
-        logger.info("Database created successfully.")
         await ensure_db_ready()
         logger.info("Database is ready.")
         await create_tables()
@@ -66,9 +62,8 @@ async def on_startup():
         # Убедитесь, что Redis доступен
         global redis
         redis = await ensure_redis_ready(REDIS_URL_TEXT)
-        logger.info("Redis is ready.")
     except Exception as e:
-        logger.error(f"Ошибка при старте приложения: {e}")
+        logger.error(f"Error when starting the application: {e}")
 
 
 @app.middleware("http")
@@ -88,14 +83,13 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/metrics")
 async def metrics():
-    """
-    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
-    """
+    """ Эндпоинт для отдачи метрик в формате, который Prometheus может собрать. """
     return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @app.get("/")
-async def root():
+async def root():  # todo: delete
+    """ debug: redirect to docs """
     logger.debug("Redirecting to /docs.")
     return RedirectResponse(url="/docs")
 
@@ -109,23 +103,20 @@ async def create_post(request: CreatePostRequest):
             async with session.get(HASH_SERVICE_URL) as response:
                 if response.status != 200:
                     error_detail = await response.text()
-                    logger.error(f"Hash service error: {error_detail}")
                     raise HTTPException(status_code=response.status,
                                         detail=f"Error from hash service: {error_detail}")
                 data = await response.json()
                 short_hash = data['hash']
-                logger.info(f"Hash generated: {short_hash}")
 
         # Сохранение в Redis или БД
         await store_in_redis_or_db(short_hash, request.text, request.ttl)
 
         # Генерация короткой ссылки
         short_url = f"http://localhost:8001/get/{short_hash}"
-        logger.info(f"Short URL created: {short_url}")
 
         return {"short_url": short_url}
     except Exception as e:
-        logger.error(f"Ошибка в create_post: {e}")
+        logger.error(f"Error in create_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -142,7 +133,6 @@ async def get_post(short_hash: str):
 
             if result:
                 text = result["text"]
-                logger.info(f"Hash {short_hash} found in database.")
 
                 # Кэшируем текст в Redis (redis_text)
                 await redis.set(short_hash, text, ex=600)  # TTL = 600 секунд
