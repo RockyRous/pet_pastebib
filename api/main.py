@@ -35,7 +35,7 @@ class CreatePostResponse(BaseModel):
 async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
     """Сохранение текста в Redis (если TTL короткий) или в БД."""
     logger.debug(f"Storing text with hash={short_hash}, ttl={ttl}")
-    if ttl <= 10:  #3600:  # Если TTL <= 1 час
+    if ttl <= 3600:  # Если TTL <= 1 час
         try:
             await redis.set(short_hash, text, ex=ttl)
             logger.info(f"Text stored in Redis with hash={short_hash}")
@@ -87,14 +87,13 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/metrics")
 async def metrics():
-    """
-    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
-    """
+    """ Эндпоинт для отдачи метрик в формате, который Prometheus может собрать. """
     return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @app.get("/")
-async def root():
+async def root():  # todo: delete
+    """ debug: redirect to docs """
     logger.debug("Redirecting to /docs.")
     return RedirectResponse(url="/docs")
 
