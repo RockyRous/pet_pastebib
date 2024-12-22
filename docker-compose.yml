@@ -88,7 +88,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_text
     volumes:
-      - ./postgreSQL/init_text.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgreSQL/init_text.sql:/docker-entrypoint-initdb.d/init.sql  # fixme: not work. Use dockerfile
       - pg_data_text:/var/lib/postgresql/data
     networks:
       - api_network
@@ -105,7 +105,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: pastebin_hash
     volumes:
-      - ./postgreSQL/init_hash.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgreSQL/init_hash.sql:/docker-entrypoint-initdb.d/init.sql  # fixme: not work. Use dockerfile
       - pg_data_hash:/var/lib/postgresql/data
     networks:
       - hash_network
