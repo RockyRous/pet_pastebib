@@ -34,7 +34,7 @@ def generate_hash(seq: int) -> str:
 
 async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
     """ Повторная попытка с задержкой """
-    logger.debug('Повторная попытка с задержкой')
+    # logger.debug(f'Retrying {func.__name__}')
     for attempt in range(retries):
         try:
             return await func()
@@ -48,7 +48,7 @@ async def retry_on_error(func, retries=MAX_RETRIES, delay=1):
 
 async def acquire_lock(redis_client, lock_key, lock_timeout):
     """ блокировки Redis """
-    logger.debug('блокировки Redis')
+    # logger.debug('Blocks Redis')
     lock_value = str(time.time())  # Уникальное значение для блокировки
     try:
         is_set = await redis_client.set(lock_key, lock_value, nx=True, px=lock_timeout)
@@ -58,9 +58,9 @@ async def acquire_lock(redis_client, lock_key, lock_timeout):
         return False, None
 
 
-async def release_lock(redis_client, lock_key, lock_value):
+async def release_lock(redis_client, lock_key, lock_value) -> None:
     """ Освобождение блокировки Redis """
-    logger.debug('Освобождение блокировки Redis')
+    # logger.debug('Releasing the Redis lock')
     try:
         current_value = await redis_client.get(lock_key)
         if current_value == lock_value:
@@ -69,12 +69,12 @@ async def release_lock(redis_client, lock_key, lock_value):
         logger.error(f"Error releasing Redis lock: {e}")
 
 
-async def populate_redis_cache():
+async def populate_redis_cache() -> None:
     """ Наполнение кеша """
-    logger.debug('Наполнение кеша')
+    # logger.debug('Populate Redis cache')
     lock_acquired, lock_value = await acquire_lock(redis_client, REDIS_LOCK_KEY, LOCK_TIMEOUT)
     if not lock_acquired:
-        logger.info("Failed to acquire lock for cache population.")
+        logger.warning("Failed to acquire lock for cache population.")
         return
 
     try:
@@ -85,16 +85,16 @@ async def populate_redis_cache():
         sequences = await retry_on_error(lambda: fetch_batch_sequences(BATCH_SIZE))
         hashes = [generate_hash(seq) for seq in sequences]
         await retry_on_error(lambda: redis_client.lpush(REDIS_HASH_KEY, *hashes))
-        logger.info(f"Added {len(hashes)} hashes to Redis.")
+        # logger.debug(f"Added {len(hashes)} hashes to Redis.")
     except Exception as e:
         logger.error(f"Error populating Redis cache: {e}")
     finally:
         await release_lock(redis_client, REDIS_LOCK_KEY, lock_value)
 
 
-async def ensure_redis_cache():
+async def ensure_redis_cache() -> None:
     """ Проверка кеша и автоматическое пополнение """
-    logger.debug('Проверка кеша и автоматическое пополнение')
+    # logger.debug('Cache check and automatic refill')
     try:
         current_count = await redis_client.llen(REDIS_HASH_KEY)
         if current_count < CRITICAL_THRESHOLD:
@@ -103,14 +103,14 @@ async def ensure_redis_cache():
         logger.error(f"Error ensuring Redis cache: {e}")
 
 
-async def ensure_redis_cache_periodically():
+async def ensure_redis_cache_periodically() -> None:
     """ Фоновая задача для проверки кеша с ограничением времени ожидания """
-    logger.debug('Фоновая задача для проверки кеша с ограничением времени ожидания')
+    logger.debug('Background task for cache check with timeout limit')
     while True:
         try:
-            logger.debug('ensure_redis_cache_periodically start')  # fixme я не понимаю работает ли этот блок
+            # logger.debug('ensure_redis_cache_periodically start')  # fixme я не понимаю работает ли этот блок
             await asyncio.wait_for(ensure_redis_cache(), timeout=10)  # Тайм-аут 10 секунд
-            await asyncio.sleep(6)  # Задержка в 60 секунд перед следующей проверкой # todo: Вынести параметр в енв
+            await asyncio.sleep(60)  # Задержка в 60 секунд перед следующей проверкой # todo: Вынести параметр в енв
         except asyncio.TimeoutError:
             logger.error("Timeout error occurred while ensuring Redis cache.")
         except Exception as e:
@@ -119,11 +119,12 @@ async def ensure_redis_cache_periodically():
 
 ### ENDPOINTS
 @app.on_event("startup")
-async def startup():
+async def startup() -> None:
     """ Инициализация приложения """
-    logger.debug('Инициализация приложения')
+    # logger.debug('Startup')
     try:
         await create_database()
+        logger.info("Checked and created database..")
         await check_and_create_sequence()
         logger.info("Checked and created sequence.")
 
@@ -137,25 +138,23 @@ async def startup():
 
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def log_requests(request: Request, call_next) -> Request:
     """ Middleware для логирования запросов и измерения их времени. """
-    logger.debug(f"Processing request: {request.method} {request.url}")
+    # logger.debug(f"Processing request: {request.method} {request.url}")
     start_time = time.time()
     response = await call_next(request)
     response_time = time.time() - start_time
 
     # Логируем и добавляем метрики
     log_request(request, response_time, response.status_code)
-    logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
+    # logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
 
     return response
 
 
 @app.get("/metrics")
-async def metrics():
-    """
-    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
-    """
+async def metrics() -> Response:
+    """ Эндпоинт для отдачи метрик в формате, который Prometheus может собрать. """
     return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
@@ -166,7 +165,8 @@ async def root():
 
 @app.get("/generate-hash")
 async def get_hash():
-    logger.debug('get_hash start')
+    """ Функция для получения короткой ссылки (хэша) """
+    # logger.debug('get_hash start')
     try:
         # Проверяем и пополняем кеш при необходимости
         await ensure_redis_cache()

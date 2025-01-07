@@ -23,4 +23,4 @@ def log_request(request, response_time, status_code):
     REQUEST_DURATION.labels(method=request.method, endpoint=str(request.url)).observe(response_time)
 
     # Логируем информацию о запросе
-    logger.info(f"Request to {request.url} completed with status {status_code}")
+    logger.info(f"REQUEST: Request to {request.url} completed with status {status_code}")
