@@ -32,26 +32,26 @@ class CreatePostResponse(BaseModel):
 
 
 ### UTILS
-async def store_in_redis_or_db(short_hash: str, text: str, ttl: int):
+async def store_in_redis_or_db(short_hash: str, text: str, ttl: int) -> None:
     """Сохранение текста в Redis (если TTL короткий) или в БД."""
-    logger.debug(f"Storing text with hash={short_hash}, ttl={ttl}")
-    if ttl <= 10:  #3600:  # Если TTL <= 1 час
+    # logger.debug(f"Storing text with hash={short_hash}, ttl={ttl}")
+    if ttl <= 3600:  # Если TTL <= 1 час
         try:
             await redis.set(short_hash, text, ex=ttl)
-            logger.info(f"Text stored in Redis with hash={short_hash}")
+            logger.info(f"Text stored in REDIS with hash={short_hash}")
         except Exception as e:
-            logger.error(f"Error storing text in Redis: {e}")
+            logger.error(f"Error storing text in REDIS: {e}")
     else:
         try:
             await store_in_db(short_hash, text, ttl)
-            logger.info(f"Text stored in database with hash={short_hash}")
+            logger.info(f"Text stored in DATABASE with hash={short_hash}")
         except Exception as e:
-            logger.error(f"Error storing text in database: {e}")
+            logger.error(f"Error storing text in DATABASE: {e}")
 
 
 ### ENDPOINTS
 @app.on_event("startup")
-async def on_startup():
+async def on_startup() -> None:
     """ Инициализация при старте приложения. """
     logger.debug("Starting application initialization.")
     try:
@@ -68,41 +68,40 @@ async def on_startup():
         redis = await ensure_redis_ready(REDIS_URL_TEXT)
         logger.info("Redis is ready.")
     except Exception as e:
-        logger.error(f"Ошибка при старте приложения: {e}")
+        logger.error(f"Error in startup app: {e}")
 
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def log_requests(request: Request, call_next) -> Response:
     """ Middleware для логирования запросов и измерения их времени. """
-    logger.debug(f"Processing request: {request.method} {request.url}")
+    # logger.debug(f"Processing request: {request.method} {request.url}")
     start_time = time.time()
     response = await call_next(request)
     response_time = time.time() - start_time
 
     # Логируем и добавляем метрики
     log_request(request, response_time, response.status_code)
-    logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
+    # logger.info(f"Request processed: {request.method} {request.url} in {response_time:.3f}s, status={response.status_code}")
 
     return response
 
 
 @app.get("/metrics")
-async def metrics():
-    """
-    Эндпоинт для отдачи метрик в формате, который Prometheus может собрать.
-    """
+async def metrics() -> Response:
+    """ Эндпоинт для отдачи метрик в формате, который Prometheus может собрать. """
     return Response(generate_latest(REGISTRY), media_type="text/plain")
 
 
 @app.get("/")
 async def root():
-    logger.debug("Redirecting to /docs.")
+    # logger.debug("Redirecting to /docs.")
     return RedirectResponse(url="/docs")
 
 
 @app.post("/create_post", response_model=CreatePostResponse)
-async def create_post(request: CreatePostRequest):
-    logger.debug(f"Received create_post request: {request}")
+async def create_post(request: CreatePostRequest) -> dict:
+    """ Создание публикации. Возвращает ссылку на пост в формате: {"short_url": short_url} """
+    # logger.debug(f"Received create_post request: {request}")
     try:
         # Генерация уникального хэша
         async with aiohttp.ClientSession() as session:
@@ -110,39 +109,39 @@ async def create_post(request: CreatePostRequest):
                 if response.status != 200:
                     error_detail = await response.text()
                     logger.error(f"Hash service error: {error_detail}")
-                    raise HTTPException(status_code=response.status,
-                                        detail=f"Error from hash service: {error_detail}")
+                    raise HTTPException(status_code=response.status, detail=f"Error from hash service: {error_detail}")
                 data = await response.json()
                 short_hash = data['hash']
-                logger.info(f"Hash generated: {short_hash}")
+                # logger.debug(f"Hash generated: {short_hash}")
 
         # Сохранение в Redis или БД
         await store_in_redis_or_db(short_hash, request.text, request.ttl)
 
         # Генерация короткой ссылки
         short_url = f"http://localhost:8001/get/{short_hash}"
-        logger.info(f"Short URL created: {short_url}")
+        # logger.debug(f"Short URL created: {short_url}")
 
         return {"short_url": short_url}
     except Exception as e:
-        logger.error(f"Ошибка в create_post: {e}")
+        logger.error(f"Error in create_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/get/{short_hash}")
-async def get_post(short_hash: str):
-    logger.debug(f"Received get_post request for hash={short_hash}")
+async def get_post(short_hash: str) -> dict:
+    """ Получение публикации по ссылке. Возвращает текст в формате: {"text": text} """
+    # logger.debug(f"Received get_post request for hash={short_hash}")
     try:
         # Сначала пытаемся получить текст из Redis
         text = await redis.get(short_hash)
 
         if not text:
-            logger.info(f"Hash {short_hash} not found in Redis, checking database.")
+            # logger.debug(f"Hash {short_hash} not found in Redis, checking database.")
             result = await get_post_db(short_hash)
 
             if result:
                 text = result["text"]
-                logger.info(f"Hash {short_hash} found in database.")
+                # logger.debug(f"Hash {short_hash} found in database.")
 
                 # Кэшируем текст в Redis (redis_text)
                 await redis.set(short_hash, text, ex=600)  # TTL = 600 секунд
@@ -151,7 +150,11 @@ async def get_post(short_hash: str):
                 logger.warning(f"Hash {short_hash} not found in database.")
                 raise HTTPException(status_code=404, detail="Post not found")
 
+        else:
+            # logger.debug(f"Hash founded in Redis.")
+            pass
+
         return {"text": text}
     except Exception as e:
-        logger.error(f"Ошибка в get_post: {e}")
+        logger.error(f"Error in get_post: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
