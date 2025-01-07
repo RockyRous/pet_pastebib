@@ -19,55 +19,59 @@ credentials = pika.PlainCredentials('user', 'password')
 connection_params = pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
 
 
-async def create_database():
-    logger.debug(f"Starting database creation process. DB URL: {DATABASE_URL_TEXT}")
+async def create_database() -> None:
+    """ Создание базы данных, если её нет. """
+    # logger.debug(f"Starting database creation process. DB URL: {DATABASE_URL_TEXT}")
     try:
         conn = await asyncpg.connect(DATABASE_URL_TEXT.replace('pastebin_text', 'postgres'))
         result = await conn.fetch("SELECT 1 FROM pg_catalog.pg_database WHERE datname = 'pastebin_text'")
         if not result:
             await conn.execute('CREATE DATABASE pastebin_text')
-            logger.info("Database 'pastebin_text' created.")
         else:
-            logger.info("Database 'pastebin_text' already exists.")
+            # logger.debug("Database 'pastebin_text' already exists.")
+            pass
         await conn.close()
     except Exception as e:
         logger.error(f"Error creating database: {e}")
 
 
-async def ensure_redis_ready(redis_url, retries=5, delay=2):
-    logger.debug(f"Ensuring Redis is ready at {redis_url}")
+async def ensure_redis_ready(redis_url: str, retries: int = 5, delay: int = 2):
+    """ Проверка подключения к РЕДИС с ретраями. """
+    # logger.debug(f"Ensuring Redis is ready at {redis_url}")
     for attempt in range(retries):
         try:
             redis_client = redis.from_url(redis_url, decode_responses=True)
             await redis_client.ping()
-            logger.info(f"Redis доступен: {redis_url}")
+            # logger.debug(f"Redis is available: {redis_url}")
             return redis_client
         except Exception as e:
-            logger.warning(f"Попытка {attempt + 1}/{retries} подключения к {redis_url} не удалась: {e}")
+            logger.warning(f"Try {attempt + 1}/{retries} connect to {redis_url} failed: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
-    logger.error(f"Не удалось подключиться к Redis: {redis_url}")
-    raise Exception(f"Не удалось подключиться к Redis: {redis_url}")
+    logger.error(f"Failed to connect to Redis: {redis_url}")
+    raise Exception(f"Failed to connect to Redis: {redis_url}")
 
 
-async def ensure_db_ready(retries=5, delay=2):
-    logger.debug("Checking database readiness.")
+async def ensure_db_ready(retries: int = 5, delay: int = 2) -> None:
+    """ Проверка подключения к БД с ретраями. """
+    # logger.debug("Checking database readiness.")
     for attempt in range(retries):
         try:
             conn = await asyncpg.connect(DATABASE_URL_TEXT)
             await conn.close()
-            logger.info("База данных доступна.")
+            # logger.debug("Database is available.")
             return
         except Exception as e:
-            logger.warning(f"Попытка {attempt + 1}/{retries} подключения к базе данных не удалась: {e}")
+            logger.warning(f"Try {attempt + 1}/{retries} connect to DB failed: {e}")
             if attempt < retries - 1:
                 await asyncio.sleep(delay)
-    logger.error("Не удалось подключиться к базе данных.")
-    raise Exception("Не удалось подключиться к базе данных.")
+    logger.error("Failed to connect to DB.")
+    raise Exception("Failed to connect to DB.")
 
 
-async def create_tables():
-    logger.debug("Starting table creation process.")
+async def create_tables() -> None:
+    """ Создание таблиц в бд """
+    # logger.debug("Starting table creation process.")
     conn = await asyncpg.connect(DATABASE_URL_TEXT)
     try:
         await conn.execute("""
@@ -78,15 +82,16 @@ async def create_tables():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        logger.info("Таблицы успешно созданы или уже существуют.")
+        # logger.debug("Tables have been successfully created or already exist.")
     except Exception as e:
         logger.error(f"Error creating tables: {e}")
     finally:
         await conn.close()
 
 
-async def store_in_db(short_hash: str, text: str, ttl: int):
-    logger.debug(f"Storing data in database: hash={short_hash}, ttl={ttl}")
+async def store_in_db(short_hash: str, text: str, ttl: int) -> None:
+    """ Запись поста в базу данных. """
+    # logger.debug(f"Storing data in database: hash={short_hash}, ttl={ttl}")
     db = await asyncpg.connect(DATABASE_URL_TEXT)
     try:
         query = """
@@ -94,7 +99,7 @@ async def store_in_db(short_hash: str, text: str, ttl: int):
             VALUES ($1, $2, $3, $4)
         """
         await db.execute(query, short_hash, text, ttl, datetime.utcnow())
-        logger.info(f"Data stored in database for hash={short_hash}.")
+        # logger.debug(f"Data stored in database for hash={short_hash}.")
 
         publish_message(short_hash, ttl)
     except Exception as e:
@@ -103,16 +108,13 @@ async def store_in_db(short_hash: str, text: str, ttl: int):
         await db.close()
 
 
-async def get_post_db(short_hash: str):
-    logger.debug(f"Fetching post from database for hash={short_hash}.")
+async def get_post_db(short_hash: str) -> dict or None:
+    """ Получение поста из базы данных по ключу (хэш). """
+    # logger.debug(f"Fetching post from database for hash={short_hash}.")
     db = await asyncpg.connect(DATABASE_URL_TEXT)
     try:
         query = "SELECT text FROM posts WHERE hash = $1"
         result = await db.fetchrow(query, short_hash)
-        if result:
-            logger.info(f"Post retrieved for hash={short_hash}.")
-        else:
-            logger.warning(f"No post found for hash={short_hash}.")
         return result
     except Exception as e:
         logger.error(f"Error fetching post from database: {e}")
@@ -121,7 +123,7 @@ async def get_post_db(short_hash: str):
 
 
 def publish_message(hash: str, ttl: int):
-    logger.debug(f"START Publishing message to RabbitMQ: hash={hash}, ttl={ttl}")
+    # logger.debug(f"START Publishing message to RabbitMQ: hash={hash}, ttl={ttl}")
     try:
         connection = pika.BlockingConnection(connection_params)
         channel = connection.channel()
@@ -141,7 +143,7 @@ def publish_message(hash: str, ttl: int):
                 headers={"x-delay": ttl * 1000}
             ),
         )
-        logger.info(f"END Message published to RabbitMQ with hash={hash} and delay={ttl * 1000}ms.")
+        # logger.info(f"END Message published to RabbitMQ with hash={hash} and delay={ttl * 1000}ms.")
         connection.close()
     except Exception as e:
         logger.error(f"Error publishing message to RabbitMQ: {e}")

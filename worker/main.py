@@ -11,7 +11,7 @@ import logging
 DATABASE_URL = os.getenv("DATABASE_URL_TEXT")
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 EXCHANGE_NAME = os.getenv("EXCHANGE_NAME", "delayed_exchange")
-credentials = pika.PlainCredentials('user', 'password') # todo: Тоже получать из енв
+credentials = pika.PlainCredentials('user', 'password') # todo: Получать из енв
 connection_params = pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials)
 
 # Настройка логгера
@@ -19,28 +19,28 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# Функция для удаления данных из PostgreSQL
-async def delete_from_db(hash_value: str):
+async def delete_from_db(hash_value: str) -> None:
+    """ Функция для удаления данных из PostgreSQL """
     conn = None
     try:
         # Подключаемся к базе данных
-        logger.info(f"Connecting to database with URL: {DATABASE_URL}")
+        # logger.debug(f"Connecting to database with URL: {DATABASE_URL}")
         conn = await asyncpg.connect(DATABASE_URL)
 
         # Выполняем запрос на удаление данных
         await conn.execute("DELETE FROM posts WHERE hash = $1", hash_value)
-        logger.info(f"Successfully deleted data with hash: {hash_value}")
+        # logger.info(f"Successfully deleted data with hash: {hash_value}")
 
     except Exception as e:
         logger.error(f"Error deleting data with hash {hash_value}: {e}")
     finally:
         if conn:
             await conn.close()
-            logger.info("Database connection closed.")
+            # logger.debug("Database connection closed.")
 
 
-# Обработчик сообщений из RabbitMQ
-def process_message(ch, method, properties, body):
+def process_message(ch, method, properties, body) -> None:
+    """ Обработчик сообщений из RabbitMQ """
     try:
         message = json.loads(body)
         hash_to_delete = message.get("hash")
@@ -68,7 +68,7 @@ def process_message(ch, method, properties, body):
 def main():
     try:
         # Настройка RabbitMQ соединения
-        logger.info(f"Connecting to RabbitMQ at {RABBITMQ_HOST}...")
+        # logger.debug(f"Connecting to RabbitMQ at {RABBITMQ_HOST}...")
 
         for i in range(5):
             try:
@@ -83,7 +83,7 @@ def main():
         channel = connection.channel()
 
         # Объявляем обменник с типом x-delayed-message
-        logger.info(f"Declaring exchange {EXCHANGE_NAME} with type x-delayed-message...")
+        logger.debug(f"Declaring exchange {EXCHANGE_NAME} with type x-delayed-message...")
         channel.exchange_declare(
             exchange=EXCHANGE_NAME,
             exchange_type="x-delayed-message",
@@ -92,7 +92,7 @@ def main():
 
         # Создание очереди и привязка к обменнику
         queue_name = "delete_queue"
-        logger.info(f"Declaring queue {queue_name} and binding to exchange...")
+        logger.debug(f"Declaring queue {queue_name} and binding to exchange...")
         channel.queue_declare(queue=queue_name)
         channel.queue_bind(exchange=EXCHANGE_NAME, queue=queue_name, routing_key="delete_key")
 

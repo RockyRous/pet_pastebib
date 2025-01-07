@@ -3,14 +3,14 @@
 
 1. **Собрать контейнер на фоне (через Docker Compose):**
    ```bash
-   docker-compose build
+   docker compose build
    ```
 
 2. **Собрать только один сервис:**
    ```bash
-   docker-compose build <service_name>
+   docker compose build <service_name>
    # Например:
-   docker-compose build api
+   docker compose build api
    ```
 
 3. **Собрать образ вручную (без Docker Compose):**
@@ -26,19 +26,19 @@
 
 4. **Запустить все контейнеры на фоне (через Docker Compose):**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 5. **Запустить только один сервис:**
    ```bash
-   docker-compose up -d <service_name>
+   docker compose up -d <service_name>
    # Например:
-   docker-compose up -d api
+   docker compose up -d api
    ```
 
 6. **Запуск контейнеров не на фоне (для вывода логов):**
    ```bash
-   docker-compose up
+   docker compose up
    ```
 
 7. **Запуск контейнера вручную (без Compose):**
@@ -61,7 +61,7 @@
 
 9. **Остановить все контейнеры:**
    ```bash
-   docker-compose down
+   docker compose down
    ```
 
 10. **Остановить один контейнер:**
@@ -89,14 +89,14 @@
 
 13. **Просмотр логов всех контейнеров:**
     ```bash
-    docker-compose logs
+    docker compose logs
     ```
 
 14. **Просмотр логов одного сервиса:**
     ```bash
-    docker-compose logs <service_name>
+    docker compose logs <service_name>
     # Например:
-    docker-compose logs api
+    docker compose logs api
     ```
 
 15. **Просмотр логов контейнера в реальном времени:**

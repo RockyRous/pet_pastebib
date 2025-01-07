@@ -8,12 +8,12 @@
 
 #### Для базы `postgres-hash`:
 ```bash
-docker exec -it postgres_hash sh
+docker exec -it postgres_hash
 ```
 
 #### Для базы `postgres-text`:
 ```bash
-docker exec -it postgres_text sh
+docker exec -it postgres_text
 ```
 
 ---
